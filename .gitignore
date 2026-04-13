@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.bin
+*.onnx
+*.pth
+*.pt
+bge-m3/
+chroma/
+*.log
+.DS_Store
+*.zip

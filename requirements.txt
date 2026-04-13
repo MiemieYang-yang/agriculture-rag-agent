@@ -1,0 +1,24 @@
+# 向量模型
+FlagEmbedding==1.2.11
+transformers==4.44.2
+
+# 向量数据库
+chromadb>=0.5.0
+
+# LLM 调用（Qwen3 兼容 OpenAI 接口）
+openai>=1.30.0
+
+# 文档处理
+pypdf>=4.0.0
+python-docx>=1.1.0
+tiktoken>=0.7.0
+
+# API 服务
+fastapi>=0.111.0
+uvicorn>=0.30.0
+pydantic>=2.7.0
+
+# 工具
+python-dotenv>=1.0.0
+loguru>=0.7.0
+tqdm>=4.66.0

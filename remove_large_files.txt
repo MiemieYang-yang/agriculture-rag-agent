@@ -1,0 +1,4 @@
+﻿agriculture-rag-agent.zip
+bge-m3/pytorch_model.bin
+bge-m3/onnx/model.onnx
+bge-m3/onnx/model.onnx_data
