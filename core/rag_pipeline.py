@@ -3,14 +3,22 @@ RAG 核心链路
 串联：Query → 检索 → 构建 Prompt → LLM 生成 → 返回结果
 
 这是整个项目最核心的文件，面试时重点讲这里的设计思路
+
+Phase 2 检索优化：
+- HyDE：假设文档嵌入
+- Reranker：BGE-Reranker-v2 重排序
+- 混合检索：BM25 + 向量检索 RRF 融合
 """
-from typing import List, Dict, Optional, Generator
+from typing import List, Dict, Optional, Generator, Tuple, Union
 
 
 from core.config import cfg
 from core.embedder import BGEEmbedder
 from core.llm_client import QwenClient
 from core.vector_store import VectorStore
+from core.reranker import BGEReranker
+from core.bm25_store import BM25Store
+from core.hybrid_retriever import HybridRetriever
 import logging
 
 logger = logging.getLogger(__name__)
@@ -38,17 +46,54 @@ class RAGPipeline:
             self,
             vector_store: Optional[VectorStore] = None,
             llm_client: Optional[QwenClient] = None,
+            embedder: Optional[BGEEmbedder] = None,
+            reranker: Optional[BGEReranker] = None,
+            bm25_store: Optional[BM25Store] = None,
+            hybrid_retriever: Optional[HybridRetriever] = None,
             top_k: int = cfg.RETRIEVAL_TOP_K,
             min_score: float = 0.4,  # 相似度低于此阈值的结果丢弃
+            use_hyde: bool = cfg.USE_HYDE,
+            use_reranker: bool = cfg.USE_RERANKER,
+            use_hybrid: bool = cfg.USE_HYBRID,
+            rerank_top_k: int = cfg.RERANK_TOP_K,
+            vector_top_k: int = cfg.VECTOR_TOP_K,
+            bm25_top_k: int = cfg.BM25_TOP_K,
+            hybrid_alpha: float = cfg.HYBRID_ALPHA,
     ):
         # 共享组件（避免重复初始化模型）
-        embedder = BGEEmbedder()
-        self.vector_store = vector_store or VectorStore(embedder=embedder)
+        self.embedder = embedder or BGEEmbedder()
+        self.vector_store = vector_store or VectorStore(embedder=self.embedder)
         self.llm_client = llm_client or QwenClient()
+        self.reranker = reranker
+        self.bm25_store = bm25_store
+        self.hybrid_retriever = hybrid_retriever
         self.top_k = top_k
         self.min_score = min_score
+        self.use_hyde = use_hyde
+        self.use_reranker = use_reranker
+        self.use_hybrid = use_hybrid
+        self.rerank_top_k = rerank_top_k
+        self.vector_top_k = vector_top_k
+        self.bm25_top_k = bm25_top_k
+        self.hybrid_alpha = hybrid_alpha
 
-        logger.info("RAG Pipeline 初始化完成")
+        # 初始化 Reranker（如果启用）
+        if self.use_reranker and self.reranker is None:
+            self.reranker = BGEReranker()
+
+        # 初始化混合检索（如果启用）
+        if self.use_hybrid and self.hybrid_retriever is None:
+            self.bm25_store = bm25_store or BM25Store()
+            self.hybrid_retriever = HybridRetriever(
+                vector_store=self.vector_store,
+                bm25_store=self.bm25_store,
+                alpha=hybrid_alpha,
+            )
+
+        logger.info(
+            f"RAG Pipeline 初始化完成 "
+            f"(hyde={use_hyde}, reranker={use_reranker}, hybrid={use_hybrid}, top_k={top_k})"
+        )
 
     # ── 主接口 ───────────────────────────────────────────────────────────────
 
@@ -140,26 +185,142 @@ class RAGPipeline:
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
-    def _retrieve(self, question: str, where: Optional[Dict]) -> List[Dict]:
+    def _retrieve(
+            self,
+            question: str,
+            where: Optional[Dict] = None,
+            return_hyde_answer: bool = False,
+    ) -> Union[List[Dict], Tuple[List[Dict], Optional[str]]]:
         """
         检索并过滤低质量结果
 
+        流程（Phase 2 优化后）：
+        1. [可选] HyDE 生成假设答案，用假设答案检索
+        2. [可选] 混合检索（BM25 + 向量检索 RRF 融合）
+        3. 或纯向量检索（粗排），获取 rerank_top_k 条结果
+        4. [可选] Reranker 重排序（精排），返回最终 top_k 条
+
         设计考量：
         - min_score 过滤：避免把完全不相关的内容喂给 LLM（会导致幻觉）
-        - 后续 Phase 2 可在这里加 Reranker 进行二次排序
+        - HyDE：问题可能表述模糊，假设答案更接近目标文档的表述风格
+        - 混合检索：BM25 擅长关键词匹配，向量擅长语义匹配，融合效果更好
+        - Reranker：向量检索是粗排，Reranker 做精排提升相关性
         """
-        if self.vector_store.count() == 0:
+        # 检查知识库是否为空
+        vec_count = self.vector_store.count()
+        bm25_count = self.bm25_store.count() if self.bm25_store else 0
+
+        if vec_count == 0 and (not self.use_hybrid or bm25_count == 0):
             logger.warning("知识库为空，请先运行 ingest.py 导入文档")
-            return []
+            return [] if not return_hyde_answer else ([], None)
 
-        results = self.vector_store.search(question, top_k=self.top_k, where=where)
+        hyde_answer = None
+        results = []
 
-        # 过滤相似度过低的结果
-        filtered = [r for r in results if r["score"] >= self.min_score]
-        if len(filtered) < len(results):
-            logger.debug(f"过滤 {len(results) - len(filtered)} 条低质量结果（阈值: {self.min_score}）")
+        # Step 1: 确定检索方式
+        if self.use_hyde:
+            # HyDE 检索
+            results, hyde_answer = self._hyde_retrieve(question, where)
+        elif self.use_hybrid and self.hybrid_retriever:
+            # 混合检索（BM25 + 向量）
+            retrieval_k = self.rerank_top_k if self.use_reranker else self.top_k
+            logger.info(f"混合检索: vector_top_k={self.vector_top_k}, bm25_top_k={self.bm25_top_k}")
 
-        return filtered
+            if self.vector_top_k > 0 and vec_count > 0:
+                results = self.hybrid_retriever.search(
+                    question,
+                    top_k=retrieval_k,
+                    vector_top_k=self.vector_top_k,
+                    bm25_top_k=self.bm25_top_k,
+                    where=where,
+                )
+            elif bm25_count > 0:
+                # 仅 BM25（向量库为空）
+                results = self.bm25_store.search(question, top_k=retrieval_k)
+
+            # 过滤低质量结果
+            results = [r for r in results if r.get("score", 0) >= self.min_score]
+        else:
+            # 常规向量检索
+            retrieval_k = self.rerank_top_k if self.use_reranker else self.top_k
+            results = self.vector_store.search(question, top_k=retrieval_k, where=where)
+
+            # 过滤低质量结果
+            results = [r for r in results if r["score"] >= self.min_score]
+
+        # Step 2: Reranker 精排
+        if self.use_reranker and self.reranker and len(results) > self.top_k:
+            logger.info(f"Reranker 精排: {len(results)} -> {self.top_k}")
+            results = self.reranker.rerank(question, results, top_k=self.top_k)
+
+            # Reranker 结果也需要过滤（可能重排后分数低于阈值）
+            results = [r for r in results if r.get("rerank_score", r.get("score", 0)) >= self.min_score]
+
+        logger.info(f"最终检索结果: {len(results)} 条")
+
+        if return_hyde_answer:
+            return results, hyde_answer
+        return results
+
+    def _hyde_retrieve(
+            self,
+            question: str,
+            where: Optional[Dict] = None,
+    ) -> Tuple[List[Dict], str]:
+        """
+        HyDE (Hypothetical Document Embedding) 检索
+
+        原理：
+        1. LLM 生成一个假设性答案（hypothetical answer）
+        2. 将假设答案编码为向量
+        3. 用假设答案向量检索（而非原始问题向量）
+
+        优势：问题可能表述模糊，但假设答案更接近目标文档的表述风格
+
+        Returns:
+            (检索结果列表, 假设答案文本)
+        """
+        logger.info(f"HyDE 模式: 生成假设答案...")
+
+        # Step 1: 生成假设答案
+        hyde_prompt = cfg.HYDE_PROMPT_TEMPLATE.format(question=question)
+        hypothetical_answer = self.llm_client.chat(
+            hyde_prompt,
+            system_prompt="你是一位农业气候领域的专家，请生成专业的假设答案。",
+            temperature=0.7,  # 稍微提高随机性，鼓励生成多样答案
+            max_tokens=512,
+        )
+        logger.debug(f"假设答案: {hypothetical_answer[:100]}...")
+
+        # Step 2: 编码假设答案
+        hyde_vector = self.embedder.encode_query(hypothetical_answer)
+
+        # Step 3: 用假设答案向量检索
+        retrieval_k = self.rerank_top_k if self.use_reranker else self.top_k
+
+        # 如果启用混合检索，用混合检索器
+        if self.use_hybrid and self.hybrid_retriever:
+            logger.info("HyDE + 混合检索")
+            results = self.hybrid_retriever.search_by_vector(
+                hyde_vector,
+                query_text=question,  # BM25 用原始问题
+                top_k=retrieval_k,
+                vector_top_k=self.vector_top_k,
+                bm25_top_k=self.bm25_top_k,
+                where=where,
+            )
+        else:
+            results = self.vector_store.search_by_vector(
+                hyde_vector,
+                top_k=retrieval_k,
+                where=where,
+            )
+
+        # 过滤低质量结果
+        filtered = [r for r in results if r.get("score", 0) >= self.min_score]
+
+        logger.info(f"HyDE 检索到 {len(filtered)} 条结果")
+        return filtered, hypothetical_answer
 
     def _build_prompt(self, question: str, retrieved: List[Dict]) -> str:
         """

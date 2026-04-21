@@ -34,11 +34,11 @@ class QwenClient:
     """
 
     def __init__(self):
-        if not cfg.QWEN_API_KEY:
-            raise ValueError(
-                "未设置 QWEN_API_KEY，请在 .env 文件中配置\n"
-                "申请地址：https://dashscope.aliyun.com/（免费额度够用）"
-            )
+        # if not cfg.QWEN_API_KEY:
+        #     raise ValueError(
+        #         "未设置 QWEN_API_KEY，请在 .env 文件中配置\n"
+        #         "申请地址：https://dashscope.aliyun.com/（免费额度够用）"
+        #     )
         self.client = OpenAI(
             api_key=cfg.QWEN_API_KEY,
             base_url=cfg.QWEN_BASE_URL,

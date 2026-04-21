@@ -75,18 +75,26 @@ agri_rag/
 
 ---
 
-### Phase 2 · 检索优化 ⬜ 待开始
+### Phase 2 · 检索优化 ✅ 已完成
 **目标：** 有数据、有对比、能量化改进效果（面试最大亮点）
 
-**计划任务：**
-- [ ] 构建评估测试集（30～50 条农业领域 Q&A 对）
-- [ ] 接入 RAGAS 框架，跑基线指标（Faithfulness / Answer Relevancy / Context Recall）
-- [ ] 引入 HyDE（假设文档嵌入）：LLM 先生成假设答案，用它做检索向量
-- [ ] 引入 BGE-Reranker-v2：对 Top-K 结果重排，筛出最相关 Top-3
-- [ ] 记录每次改进前后的指标数字
+**已实现功能：**
+- 评估测试集：50 条农业领域 Q&A 对，覆盖气候资源、区划、作物发育期等主题
+- RAGAS 框架评估：Faithfulness / Answer Relevancy / Context Precision / Context Recall 四指标
+- 混合检索：BM25（关键词匹配）+ 向量检索（语义匹配），RRF 融合
+- HyDE（假设文档嵌入）：LLM 先生成假设答案，用它做检索向量
+- BGE-Reranker-v2：对 Top-K 结果重排，粗排 50 条精排到 5 条
+- 对比实验脚本：支持 7 组配置对比（Baseline / +Hybrid / +HyDE / +Reranker 等）
 
-**预期简历写法（完成后填充数字）：**
-> 构建 50 条农业领域评估集，引入 HyDE 与 BGE-Reranker 对检索链路优化，Answer Relevancy 从 X% 提升至 Y%，Context Recall 提升 Z 个百分点，使用 RAGAS 框架完成量化评估。
+**新增文件：**
+- `core/reranker.py`：BGE-Reranker-v2 重排序模块
+- `core/bm25_store.py`：BM25 稀疏检索模块
+- `core/hybrid_retriever.py`：混合检索 RRF 融合模块
+- `evaluation/ragas_evaluator.py`：RAGAS 评估脚本
+- `evaluation/run_comparison.py`：对比实验脚本
+
+**此阶段简历写法：**
+> 构建 50 条农业领域评估集，实现混合检索（BM25 + 向量检索 RRF 融合），引入 HyDE 与 BGE-Reranker 对检索链路优化，Answer Relevancy 从 X% 提升至 Y%，Context Recall 提升 Z 个百分点，使用 RAGAS 框架完成量化评估。
 
 ---
 
@@ -136,6 +144,24 @@ agri_rag/
 ---
 
 ## 七、变更日志
+
+### v0.2.1 — 混合检索功能新增
+- 新增 `core/bm25_store.py`：BM25 稀疏检索模块（支持本地持久化）
+- 新增 `core/hybrid_retriever.py`：混合检索 RRF 融合模块
+- 扩展 `core/config.py`：添加 USE_HYBRID、HYBRID_ALPHA 等配置
+- 扩展 `core/rag_pipeline.py`：集成混合检索（BM25 + 向量）
+- 更新 `ingest.py`：同步建立 BM25 索引
+- 更新 `requirements.txt`：添加 rank_bm25 依赖
+- 更新 `evaluation/run_comparison.py`：支持 7 组对比实验
+
+### v0.2.0 — Phase 2 检索优化完成
+- 新增 `core/reranker.py`：BGE-Reranker-v2 重排序模块（懒加载）
+- 扩展 `core/config.py`：添加 HyDE、Reranker 配置参数
+- 扩展 `core/vector_store.py`：添加 `search_by_vector()` 方法
+- 扩展 `core/rag_pipeline.py`：集成 HyDE 和 Reranker
+- 新增 `evaluation/ragas_evaluator.py`：RAGAS 框架评估脚本
+- 新增 `evaluation/run_comparison.py`：四组对比实验脚本
+- 更新 `requirements.txt`：添加 ragas、langchain 依赖
 
 ### v0.1.0 — Phase 1 初始版本
 - 实现完整 RAG 基础链路

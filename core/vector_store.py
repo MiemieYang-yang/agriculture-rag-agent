@@ -169,6 +169,52 @@ class VectorStore:
         logger.debug(f"检索到 {len(retrieved)} 条，最高分: {retrieved[0]['score'] if retrieved else 'N/A'}")
         return retrieved
 
+    def search_by_vector(
+            self,
+            query_vector: List[float],
+            top_k: int = cfg.RETRIEVAL_TOP_K,
+            where: Optional[Dict] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        直接用向量检索（用于 HyDE）
+
+        HyDE 场景：LLM 先生成假设答案，将假设答案编码为向量，
+        用这个向量检索（而非原始问题的向量）
+
+        Args:
+            query_vector: 已编码的查询向量（如假设答案的向量）
+            top_k: 返回最相关的 K 条
+            where: 元数据过滤条件
+
+        Returns:
+            [{"content": str, "metadata": dict, "score": float}, ...]
+        """
+        kwargs = dict(
+            query_embeddings=[query_vector],
+            n_results=min(top_k, self.collection.count()),
+            include=["documents", "metadatas", "distances"],
+        )
+        if where:
+            kwargs["where"] = where
+
+        result = self.collection.query(**kwargs)
+
+        # 整理返回格式
+        retrieved = []
+        for doc, meta, dist in zip(
+                result["documents"][0],
+                result["metadatas"][0],
+                result["distances"][0],
+        ):
+            retrieved.append({
+                "content": doc,
+                "metadata": meta,
+                "score": round(1 - dist, 4),
+            })
+
+        logger.debug(f"向量检索到 {len(retrieved)} 条，最高分: {retrieved[0]['score'] if retrieved else 'N/A'}")
+        return retrieved
+
     # ── 状态查询 ─────────────────────────────────────────────────────────────
 
     def count(self) -> int:
@@ -200,3 +246,7 @@ class VectorStore:
             else:
                 serialized[k] = str(v)
         return serialized
+
+if __name__ == "__main__":
+    store = VectorStore()
+    # store.clear()

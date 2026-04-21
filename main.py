@@ -16,8 +16,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def run_cli():
-    """命令行交互模式：直接在终端问答"""
+def run_cli(stream: bool = False):
+    """命令行交互模式：直接在终端问答
+    
+    Args:
+        stream: 是否启用流式输出
+    """
     from core.rag_pipeline import RAGPipeline
 
     logger.info("初始化 RAG Pipeline...")
@@ -29,6 +33,10 @@ def run_cli():
 
     print("\n" + "=" * 60)
     print("  农业气候与资源数据专家助手")
+    if stream:
+        print("  模式: 流式输出 (边生成边显示)")
+    else:
+        print("  模式: 普通输出 (等待完整回答)")
     print("  输入问题开始对话，输入 'quit' 退出，输入 'clear' 清除历史")
     print("=" * 60 + "\n")
 
@@ -52,12 +60,28 @@ def run_cli():
             continue
 
         try:
-            result = pipeline.query(question, history=history)
+            if stream:
+                # 流式输出模式
+                print("\n助手: ", end="", flush=True)
+                answer_chunks = []
+                for token in pipeline.query_stream(question, history=history):
+                    print(token, end="", flush=True)
+                    answer_chunks.append(token)
+                print()  # 换行
+                
+                answer = "".join(answer_chunks)
+                result = {
+                    "answer": answer,
+                    "sources": [],  # 流式模式下不显示来源（可以后续优化）
+                    "retrieved_count": 0,
+                }
+            else:
+                # 普通模式
+                result = pipeline.query(question, history=history)
+                print(f"\n助手: {result['answer']}")
 
-            print(f"\n助手: {result['answer']}")
-
-            # 显示引用来源
-            if result["sources"]:
+            # 显示引用来源（仅普通模式）
+            if not stream and result["sources"]:
                 print(f"\n  📄 引用来源（共 {result['retrieved_count']} 条检索结果）:")
                 for src in result["sources"]:
                     page_info = f" p.{src['page']}" if src.get('page') else ""
@@ -117,9 +141,10 @@ if __name__ == "__main__":
     parser.add_argument("--serve", action="store_true", help="启动 API 服务模式")
     parser.add_argument("--host", default="0.0.0.0", help="API 监听地址")
     parser.add_argument("--port", type=int, default=8000, help="API 端口")
+    parser.add_argument("--stream", action="store_true", help="启用流式输出（CLI模式）")
     args = parser.parse_args()
 
     if args.serve:
         run_server(args.host, args.port)
     else:
-        run_cli()
+        run_cli(stream=args.stream)

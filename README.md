@@ -43,6 +43,9 @@ python ingest.py
 # 命令行交互模式
 python main.py
 
+# 命令行流式交互模式
+python main.py--stream
+
 # API 服务模式
 python main.py --serve
 # 访问 http://localhost:8000/docs 查看接口文档

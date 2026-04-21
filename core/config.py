@@ -29,6 +29,32 @@ class Config:
     CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "512"))
     CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "64"))
 
+    # ── HyDE 配置（Phase 2）──────────────────────────
+    USE_HYDE: bool = os.getenv("USE_HYDE", "false").lower() == "true"
+
+    HYDE_PROMPT_TEMPLATE: str = """请为以下问题写一个详细的假设答案。
+这个答案应该：
+1. 像是从专业农业文献中摘录的内容
+2. 包含具体的数据和指标
+3. 使用专业术语
+
+问题：{question}
+
+假设答案："""
+
+    # ── Reranker 配置（Phase 2）──────────────────────
+    USE_RERANKER: bool = os.getenv("USE_RERANKER", "false").lower() == "true"
+    RERANKER_MODEL_NAME: str = os.getenv("RERANKER_MODEL_NAME", "BAAI/bge-reranker-v2-m3")
+    RERANK_TOP_K: int = int(os.getenv("RERANK_TOP_K", "50"))  # 粗排数量
+
+    # ── 混合检索配置（Phase 2）──────────────────────
+    USE_HYBRID: bool = os.getenv("USE_HYBRID", "true").lower() == "true"
+    HYBRID_ALPHA: float = float(os.getenv("HYBRID_ALPHA", "0.5"))  # 向量检索权重
+    HYBRID_RRF_K: int = int(os.getenv("HYBRID_RRF_K", "60"))  # RRF 参数
+    BM25_PERSIST_DIR: str = os.getenv("BM25_PERSIST_DIR", "./vectorstore/bm25_index")
+    VECTOR_TOP_K: int = int(os.getenv("VECTOR_TOP_K", "50"))  # 向量检索数量
+    BM25_TOP_K: int = int(os.getenv("BM25_TOP_K", "50"))  # BM25 检索数量
+
     # ── Prompt 模板 ───────────────────────────────────
     SYSTEM_PROMPT: str = """你是一位专业的农业气候与资源数据专家助手。
 你的知识来源于权威的农业科学文献、气象数据和作物种植手册。
