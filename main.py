@@ -4,6 +4,9 @@
 两种运行模式：
 1. 命令行交互模式（开发调试用）：python main.py
 2. API 服务模式（演示/集成用）：  python main.py --serve
+
+Phase 3 新增：
+3. Agent 模式（工具调用）：      python main.py --agent
 """
 import argparse
 import sys
@@ -104,6 +107,96 @@ def run_cli(stream: bool = False):
             print(f"出错了: {e}\n")
 
 
+def run_agent(stream: bool = False):
+    """Agent 命令行交互模式：支持工具调用的智能问答
+
+    Args:
+        stream: 是否启用流式输出
+    """
+    from core.agent.agent import AgricultureAgent, AgentContext
+
+    logger.info("初始化 Agriculture Agent...")
+    agent = AgricultureAgent()
+    context = AgentContext()
+
+    print("\n" + "=" * 60)
+    print("  农业气候与资源数据专家助手（Agent 模式）")
+    print("  支持：天气查询、农学计算、知识库检索")
+    if stream:
+        print("  模式: 流式输出")
+    else:
+        print("  模式: 普通输出")
+    print("  输入问题开始对话，输入 'quit' 退出，输入 'clear' 清除历史")
+    print("=" * 60 + "\n")
+
+    history = []
+
+    while True:
+        try:
+            question = input("你: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n再见！")
+            break
+
+        if not question:
+            continue
+        if question.lower() in {"quit", "exit", "退出"}:
+            print("再见！")
+            break
+        if question.lower() in {"clear", "清除历史"}:
+            history = []
+            context = AgentContext()
+            print("对话历史和上下文已清除\n")
+            continue
+
+        try:
+            # Agent 处理
+            result = agent.process(question, history=history if history else None, context=context)
+
+            # 显示回答
+            print(f"\n助手: {result.answer}")
+
+            # 显示工具调用信息
+            if result.tool_calls:
+                print(f"\n  🔧 工具调用（共 {len(result.tool_calls)} 次）:")
+                for tc in result.tool_calls:
+                    status = "✓" if tc.success else "✗"
+                    print(f"     {status} {tc.name}")
+                    if not tc.success:
+                        print(f"       错误: {tc.result.get('error', '未知错误')}")
+
+            # 显示引用来源
+            if result.sources:
+                print(f"\n  📄 引用来源（共 {len(result.sources)} 条）:")
+                for src in result.sources[:3]:  # 只显示前3条
+                    page_info = f" p.{src.get('page')}" if src.get('page') else ""
+                    print(f"     · {src.get('filename')}{page_info}")
+                    print(f"       {src.get('snippet', '')[:80]}...")
+
+            # 显示迭代次数
+            if result.iterations > 1:
+                print(f"\n  🔄 Agent 迭代次数: {result.iterations}")
+
+            print()
+
+            # 维护对话历史
+            history.extend([
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": result.answer},
+            ])
+
+            # 更新上下文
+            context = result.context or context
+
+            # 控制历史长度
+            if len(history) > 20:
+                history = history[-20:]
+
+        except Exception as e:
+            logger.error(f"Agent 处理失败: {e}")
+            print(f"出错了: {e}\n")
+
+
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     """API 服务模式：启动 FastAPI"""
     import uvicorn
@@ -139,6 +232,7 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="农业 RAG 专家助手")
     parser.add_argument("--serve", action="store_true", help="启动 API 服务模式")
+    parser.add_argument("--agent", action="store_true", help="启动 Agent 模式（支持工具调用）")
     parser.add_argument("--host", default="0.0.0.0", help="API 监听地址")
     parser.add_argument("--port", type=int, default=8000, help="API 端口")
     parser.add_argument("--stream", action="store_true", help="启用流式输出（CLI模式）")
@@ -146,5 +240,7 @@ if __name__ == "__main__":
 
     if args.serve:
         run_server(args.host, args.port)
+    elif args.agent:
+        run_agent(stream=args.stream)
     else:
         run_cli(stream=args.stream)

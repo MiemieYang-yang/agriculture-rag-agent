@@ -148,3 +148,165 @@ class QwenClient:
             messages.extend(history)
         messages.append({"role": "user", "content": user_message})
         return messages
+
+    # ── Tool Calling 支持（Phase 3）──────────────────────────────────────────
+
+    def chat_with_tools(
+            self,
+            user_message: str,
+            tools: List[Dict],
+            system_prompt: str = cfg.SYSTEM_PROMPT,
+            history: Optional[List[Dict]] = None,
+            tool_choice: str = "auto",
+            temperature: float = 0.3,
+            max_tokens: int = 2048,
+    ) -> Dict:
+        """
+        支持工具调用的聊天接口
+
+        Args:
+            user_message: 用户输入
+            tools: OpenAI tool schema 列表
+            system_prompt: 系统提示词
+            history: 对话历史
+            tool_choice: 工具选择策略 ("auto", "none", 或指定工具名)
+            temperature: 生成随机性
+            max_tokens: 最大输出长度
+
+        Returns:
+            {
+                "content": str,              # 文本回复（可能为空）
+                "tool_calls": List[Dict],    # 工具调用请求列表
+                "finish_reason": str,        # 结束原因 ("stop" 或 "tool_calls")
+            }
+        """
+        messages = self._build_messages(user_message, system_prompt, history)
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice=tool_choice if tool_choice != "auto" else "auto",
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+
+            choice = response.choices[0]
+            finish_reason = choice.finish_reason
+
+            # 提取内容
+            content = choice.message.content or ""
+
+            # 提取工具调用
+            tool_calls = []
+            if choice.message.tool_calls:
+                for tc in choice.message.tool_calls:
+                    tool_calls.append({
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    })
+
+            logger.debug(
+                f"Tool calling 响应: finish_reason={finish_reason}, "
+                f"content_len={len(content)}, tool_calls={len(tool_calls)}"
+            )
+
+            return {
+                "content": content,
+                "tool_calls": tool_calls,
+                "finish_reason": finish_reason,
+            }
+
+        except Exception as e:
+            logger.error(f"Tool calling 调用失败: {e}")
+            raise
+
+    def submit_tool_results(
+            self,
+            tool_call_results: List[Dict],
+            system_prompt: str = cfg.SYSTEM_PROMPT,
+            history: Optional[List[Dict]] = None,
+            temperature: float = 0.3,
+            max_tokens: int = 2048,
+            tools: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        提交工具执行结果，获取下一步响应
+
+        Args:
+            tool_call_results: 工具调用结果列表，格式：
+                [{
+                    "tool_call_id": str,  # 原工具调用的 ID
+                    "name": str,          # 工具名称
+                    "result": str,        # 工具返回结果（JSON 字符串）
+                }]
+            system_prompt: 系统提示词
+            history: 对话历史（包含之前的用户消息和助手消息）
+            tools: 可用工具列表（如果继续允许工具调用）
+            temperature: 生成随机性
+            max_tokens: 最大输出长度
+
+        Returns:
+            同 chat_with_tools 返回格式
+        """
+        # 构建 messages
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history)
+
+        # 添加每个工具调用结果
+        for result in tool_call_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": result.get("tool_call_id", ""),
+                "content": result.get("result", ""),
+            })
+
+        try:
+            # 调用 API
+            if tools:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            else:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+
+            choice = response.choices[0]
+            finish_reason = choice.finish_reason
+            content = choice.message.content or ""
+
+            tool_calls = []
+            if choice.message.tool_calls:
+                for tc in choice.message.tool_calls:
+                    tool_calls.append({
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    })
+
+            logger.debug(
+                f"工具结果提交后响应: finish_reason={finish_reason}, "
+                f"tool_calls={len(tool_calls)}"
+            )
+
+            return {
+                "content": content,
+                "tool_calls": tool_calls,
+                "finish_reason": finish_reason,
+            }
+
+        except Exception as e:
+            logger.error(f"提交工具结果失败: {e}")
+            raise

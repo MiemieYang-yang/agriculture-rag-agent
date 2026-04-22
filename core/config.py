@@ -80,5 +80,12 @@ class Config:
 - 如参考资料不足以完整回答，说明哪些部分是你的推断
 """
 
+    # ── Agent 配置（Phase 3）──────────────────────────
+    AGENT_MAX_ITERATIONS: int = int(os.getenv("AGENT_MAX_ITERATIONS", "5"))  # 防止无限循环
+    AGENT_ENABLE_TOOLS: bool = os.getenv("AGENT_ENABLE_TOOLS", "true").lower() == "true"
+    # 天气 API（可选，默认使用模拟数据）
+    WEATHER_API_KEY: str = os.getenv("WEATHER_API_KEY", "")
+    WEATHER_API_URL: str = os.getenv("WEATHER_API_URL", "")
+
 
 cfg = Config()

@@ -9,3 +9,4 @@ chroma/
 *.log
 .DS_Store
 *.zip
+.idea

@@ -5,16 +5,18 @@ FastAPI 接口层
 接口列表：
 - POST /api/query      → 单次 RAG 问答
 - POST /api/chat       → 多轮对话
+- POST /api/agent/query → Agent 智能问答（支持工具调用）
 - GET  /api/stats      → 知识库统计
 - GET  /health         → 健康检查
 """
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.rag_pipeline import RAGPipeline
+from core.agent.agent import AgricultureAgent, AgentContext
 
 import logging
 
@@ -24,6 +26,7 @@ router = APIRouter()
 
 # RAG Pipeline 单例，避免每次请求重新初始化模型
 _pipeline: Optional[RAGPipeline] = None
+_agent: Optional[AgricultureAgent] = None
 
 
 def get_pipeline() -> RAGPipeline:
@@ -31,6 +34,14 @@ def get_pipeline() -> RAGPipeline:
     if _pipeline is None:
         _pipeline = RAGPipeline()
     return _pipeline
+
+
+def get_agent() -> AgricultureAgent:
+    """获取 Agent 单例"""
+    global _agent
+    if _agent is None:
+        _agent = AgricultureAgent(rag_pipeline=get_pipeline())
+    return _agent
 
 
 # ── 数据模型 ─────────────────────────────────────────────────────────────────
@@ -58,6 +69,29 @@ class QueryResponse(BaseModel):
     sources: List[SourceInfo]
     question: str
     retrieved_count: int
+
+
+# ── Agent 接口数据模型（Phase 3）─────────────────────────────────────────────
+
+class ToolCallInfo(BaseModel):
+    id: str
+    name: str
+    arguments: Dict
+    result: Dict
+    success: bool
+
+
+class AgentQueryRequest(BaseModel):
+    question: str = Field(..., min_length=2, max_length=1000, description="用户问题")
+    history: List[dict] = Field(default=[], description="对话历史")
+    enable_tools: bool = Field(default=True, description="是否启用工具调用")
+
+
+class AgentQueryResponse(BaseModel):
+    answer: str
+    tool_calls: List[ToolCallInfo] = Field(default=[], description="工具调用记录")
+    sources: List[SourceInfo] = Field(default=[], description="引用来源")
+    iterations: int = Field(default=0, description="迭代次数")
 
 
 # ── 接口实现 ─────────────────────────────────────────────────────────────────
@@ -124,6 +158,87 @@ async def stats():
             "total_documents": pipeline.vector_store.count(),
             "collection": pipeline.vector_store.collection_name,
             "model": pipeline.llm_client.model,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Agent 接口（Phase 3）─────────────────────────────────────────────────────
+
+@router.post("/agent/query", response_model=AgentQueryResponse, summary="Agent 智能问答")
+async def agent_query(req: AgentQueryRequest):
+    """
+    Agent 智能问答接口
+
+    特点：
+    - 支持工具调用（天气查询、农学计算、知识库检索）
+    - 支持多轮追问
+    - 自动判断是否需要调用工具
+
+    流程：
+    1. 接收问题
+    2. Agent 判断是否需要调用工具
+    3. 如需要，执行工具并将结果整合
+    4. 返回最终答案 + 工具调用记录
+    """
+    try:
+        agent = get_agent()
+
+        # 执行 Agent
+        result = agent.process(
+            question=req.question,
+            history=req.history if req.history else None,
+        )
+
+        # 构建响应
+        tool_calls = [
+            ToolCallInfo(
+                id=tc.get("id", ""),
+                name=tc.get("name", ""),
+                arguments=tc.get("arguments", {}),
+                result=tc.get("result", {}),
+                success=tc.get("success", False),
+            )
+            for tc in result.to_dict().get("tool_calls", [])
+        ]
+
+        sources = [
+            SourceInfo(
+                filename=src.get("filename", ""),
+                page=src.get("page"),
+                score=src.get("score", 0),
+                snippet=src.get("snippet", ""),
+            )
+            for src in result.sources
+        ]
+
+        return AgentQueryResponse(
+            answer=result.answer,
+            tool_calls=tool_calls,
+            sources=sources,
+            iterations=result.iterations,
+        )
+
+    except Exception as e:
+        logger.error(f"Agent 查询失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agent/tools", summary="获取可用工具列表")
+async def list_tools():
+    """列出 Agent 可用的所有工具"""
+    try:
+        agent = get_agent()
+        tools = agent.tool_registry.get_all_tools()
+        return {
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters_schema,
+                }
+                for tool in tools
+            ]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

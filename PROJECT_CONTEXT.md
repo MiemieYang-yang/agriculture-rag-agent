@@ -98,17 +98,33 @@ agri_rag/
 
 ---
 
-### Phase 3 · Agent 能力 ⬜ 待开始
+### Phase 3 · Agent 能力 ✅ 已完成
 **目标：** 引入工具调用，展示 Agent 决策能力
 
-**计划任务：**
-- [ ] 封装工具：天气 API 查询、农学指标计算（积温/降水）、本地数据库查询
-- [ ] 实现 ReAct 循环：意图识别 → 工具路由 → 执行 → 整合 → 回复
-- [ ] 工具调用异常处理：重试、格式校验、防循环
-- [ ] 多轮追问支持（"那玉米呢？""那明天呢？"）
+**已实现功能：**
+- 工具封装：天气查询（模拟数据）、农学指标计算（积温/降水）、知识库检索
+- Qwen Tool Calling：扩展 llm_client.py 支持 chat_with_tools() 和 submit_tool_results()
+- ReAct 循环：意图识别 → 工具路由 → 执行 → 结果整合 → 回复
+- 多轮追问：AgentContext 维护作物/地点/时间实体，支持"那玉米呢？"追问
+- 异常处理：最大迭代次数限制（5次）、工具执行异常捕获、参数校验
 
-**预期简历写法：**
-> 在 RAG 基础上引入 Agent 能力，封装天气查询、农学指标计算等工具，基于 ReAct 框架实现意图识别 → 工具路由 → 结果整合的自主决策流程，支持多轮追问，处理工具调用异常与格式校验。
+**新增文件：**
+- `core/tools/base.py`：工具基类定义（ToolResult、BaseTool）
+- `core/tools/weather_tool.py`：天气查询工具（模拟中国主要农业城市数据）
+- `core/tools/agri_calculator.py`：农学计算工具（积温、降水统计、发育期推算）
+- `core/tools/knowledge_search.py`：知识库检索工具
+- `core/agent/agent.py`：Agent 核心逻辑（ReAct 循环、多轮追问）
+- `core/agent/tool_registry.py`：工具注册中心
+- `core/agent/prompts.py`：Agent Prompt 模板
+
+**扩展文件：**
+- `core/llm_client.py`：添加 chat_with_tools() 和 submit_tool_results() 方法
+- `core/config.py`：添加 AGENT_MAX_ITERATIONS、AGENT_ENABLE_TOOLS 等配置
+- `api/routes.py`：添加 /api/agent/query 和 /api/agent/tools 接口
+- `main.py`：添加 --agent 参数，支持 Agent CLI 模式
+
+**此阶段简历写法：**
+> 在 RAG 基础上引入 Agent 能力，封装天气查询、农学指标计算等工具，基于 Qwen Tool Calling 实现意图识别 → 工具路由 → 结果整合的自主决策流程，支持多轮追问，处理工具调用异常与格式校验，最大迭代次数限制防止无限循环。
 
 ---
 
@@ -144,6 +160,31 @@ agri_rag/
 ---
 
 ## 七、变更日志
+
+### v0.3.0 — Phase 3 Agent 能力完成
+- 新增 `core/tools/` 目录：工具模块
+  - `base.py`：ToolResult 数据类、BaseTool 抽象基类
+  - `weather_tool.py`：天气查询工具（模拟 10 个主要农业城市数据）
+  - `agri_calculator.py`：农学计算工具（积温、降水统计、发育期推算）
+  - `knowledge_search.py`：知识库检索工具（封装 RAG Pipeline）
+- 新增 `core/agent/` 目录：Agent 模块
+  - `agent.py`：AgricultureAgent 核心（ReAct 循环、AgentContext 多轮追问）
+  - `tool_registry.py`：工具注册中心（生成 OpenAI tool schema）
+  - `prompts.py`：Agent 系统提示词模板
+- 扩展 `core/llm_client.py`：
+  - 新增 `chat_with_tools()` 方法：支持 Qwen Tool Calling
+  - 新增 `submit_tool_results()` 方法：提交工具执行结果
+- 扩展 `core/config.py`：
+  - 新增 AGENT_MAX_ITERATIONS（最大迭代次数，默认 5）
+  - 新增 AGENT_ENABLE_TOOLS（是否启用工具）
+  - 新增 WEATHER_API_KEY/URL（天气 API 配置，预留）
+- 扩展 `api/routes.py`：
+  - 新增 `/api/agent/query` 接口：Agent 智能问答
+  - 新增 `/api/agent/tools` 接口：获取可用工具列表
+  - 新增 AgentQueryRequest/AgentQueryResponse 数据模型
+- 扩展 `main.py`：
+  - 新增 `--agent` 参数：Agent CLI 模式
+  - 新增 `run_agent()` 函数：Agent 命令行交互
 
 ### v0.2.1 — 混合检索功能新增
 - 新增 `core/bm25_store.py`：BM25 稀疏检索模块（支持本地持久化）
