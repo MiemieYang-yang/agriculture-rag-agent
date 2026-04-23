@@ -7,6 +7,9 @@
 
 Phase 3 新增：
 3. Agent 模式（工具调用）：      python main.py --agent
+
+Phase 4 新增：
+4. Gradio 前端模式：             python main.py --gradio
 """
 import argparse
 import sys
@@ -229,12 +232,45 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     uvicorn.run(app, host=host, port=port)
 
 
+def run_gradio(host: str = "0.0.0.0", port: int = 7860, share: bool = False):
+    """Gradio 前端模式：启动 Web 界面"""
+    from gradio_app import app
+
+    logger.info(f"Gradio 服务启动: http://{host}:{port}")
+    if share:
+        logger.info("公网分享已启用，将生成临时公网链接")
+    app.launch(
+        server_name=host,
+        server_port=port,
+        share=share,
+    )
+
+
+def run_streamlit(host: str = "0.0.0.0", port: int = 8501):
+    """Streamlit 前端模式：启动 Web 界面"""
+    import subprocess
+    import sys
+
+    logger.info(f"Streamlit 服务启动: http://{host}:{port}")
+    cmd = [
+        sys.executable, "-m", "streamlit", "run", "streamlit_app.py",
+        "--server.address", host,
+        "--server.port", str(port),
+        "--server.headless", "true",
+        "--browser.gatherUsageStats", "false",
+    ]
+    subprocess.run(cmd)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="农业 RAG 专家助手")
     parser.add_argument("--serve", action="store_true", help="启动 API 服务模式")
     parser.add_argument("--agent", action="store_true", help="启动 Agent 模式（支持工具调用）")
-    parser.add_argument("--host", default="0.0.0.0", help="API 监听地址")
-    parser.add_argument("--port", type=int, default=8000, help="API 端口")
+    parser.add_argument("--gradio", action="store_true", help="启动 Gradio 前端模式")
+    parser.add_argument("--streamlit", action="store_true", help="启动 Streamlit 前端模式")
+    parser.add_argument("--host", default="0.0.0.0", help="服务监听地址")
+    parser.add_argument("--port", type=int, default=8000, help="API 端口（Gradio 默认 7860，Streamlit 默认 8501）")
+    parser.add_argument("--share", action="store_true", help="Gradio 模式下启用公网分享")
     parser.add_argument("--stream", action="store_true", help="启用流式输出（CLI模式）")
     args = parser.parse_args()
 
@@ -242,5 +278,11 @@ if __name__ == "__main__":
         run_server(args.host, args.port)
     elif args.agent:
         run_agent(stream=args.stream)
+    elif args.gradio:
+        port = args.port if args.port != 8000 else 7860
+        run_gradio(args.host, port, args.share)
+    elif args.streamlit:
+        port = args.port if args.port != 8000 else 8501
+        run_streamlit(args.host, port)
     else:
         run_cli(stream=args.stream)

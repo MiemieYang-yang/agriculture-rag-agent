@@ -27,6 +27,7 @@
 | 文本切分 | LangChain RecursiveCharacterTextSplitter | 语义感知切分，简历友好 |
 | LLM | Qwen（通义千问） | 兼容 OpenAI 接口 |
 | API 框架 | FastAPI | 自带 Swagger 文档 |
+| 前端框架 | Streamlit | 快速构建交互式 Web 界面，界面更美观 |
 | 包版本锁定 | FlagEmbedding==1.2.11, transformers==4.44.2 | 避免兼容性问题 |
 
 ---
@@ -50,7 +51,9 @@ agri_rag/
 ├── vectorstore/                # ChromaDB 持久化数据（自动生成）
 ├── .env.example                # 配置模板
 ├── ingest.py                   # 一键入库脚本
-├── main.py                     # 启动入口（CLI / API 双模式）
+├── main.py                     # 启动入口（CLI / API / Agent / Gradio / Streamlit 五模式）
+├── gradio_app.py               # Gradio 前端界面
+├── streamlit_app.py            # Streamlit 前端界面 ★
 ├── requirements.txt            # 依赖（版本已锁定）
 └── README.md                   # 项目文档
 ```
@@ -128,14 +131,20 @@ agri_rag/
 
 ---
 
-### Phase 4 · 工程化 ⬜ 待开始
+### Phase 4 · 工程化 🚧 进行中
 **目标：** 体现生产交付意识，锦上添花
+
+**已实现功能：**
+- [x] Gradio 前端界面：Agent/RAG 模式切换、多轮对话、工具调用展示、引用来源展示
 
 **计划任务：**
 - [ ] 流式输出（Streaming）：边生成边返回
 - [ ] LangSmith 链路追踪与日志
 - [ ] 增量知识库更新（新文档自动入库，不重建索引）
 - [ ] Docker 容器化部署
+
+**此阶段简历写法：**
+> 使用 Streamlit 构建交互式 Web 界面，支持 Agent/RAG 双模式切换，实时展示工具调用链路与引用来源，提供开箱即用的演示能力。
 
 ---
 
@@ -156,10 +165,29 @@ agri_rag/
 | 问题 | 原因 | 解决方案 |
 |------|------|---------|
 | `ImportError: cannot import name 'is_torch_fx_available'` | FlagEmbedding 新版与 transformers 不兼容 | 锁定 `FlagEmbedding==1.2.11` + `transformers==4.44.2` |
+| Gradio 6.0 `css`/`theme` 参数报错 | Gradio 6.0 API 大幅变化 | 移除不兼容参数，使用 `fill_height=True` |
+| Gradio 6.0 `show_copy_button` 报错 | 参数改为 `buttons=["copy"]` | 更新 Chatbot 组件参数 |
+| Gradio 6.0 `type` 参数报错 | Gradio 6.0 默认使用 Message 格式 | 移除 `type="messages"` 参数 |
+| Gradio 6.0 examples 格式错误 | 需使用 `{"text": "问题"}` 格式 | 更新示例问题数据结构 |
 
 ---
 
 ## 七、变更日志
+
+### v0.4.0 — Phase 4 前端界面
+- 新增 `gradio_app.py`：Gradio 交互式 Web 界面（Gradio 6.0 兼容）
+- 新增 `streamlit_app.py`：Streamlit 交互式 Web 界面（更美观）
+  - Agent/RAG 双模式切换
+  - 多轮对话
+  - 引用来源展示（文件名、页码、相关度、片段预览）
+  - 工具调用记录展示（调用名、参数、结果）
+  - 知识库状态面板（文档数、模型、检索配置）
+  - 5 个示例农业问题
+- 扩展 `main.py`：
+  - 新增 `--gradio` 参数：Gradio 前端模式
+  - 新增 `--streamlit` 参数：Streamlit 前端模式
+  - 新增 `--share` 参数：公网分享（仅 Gradio）
+- 更新 `requirements.txt`：添加 `gradio>=6.0.0` 和 `streamlit>=1.30.0` 依赖
 
 ### v0.3.0 — Phase 3 Agent 能力完成
 - 新增 `core/tools/` 目录：工具模块

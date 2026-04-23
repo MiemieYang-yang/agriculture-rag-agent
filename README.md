@@ -51,6 +51,10 @@ python main.py --serve
 # 访问 http://localhost:8000/docs 查看接口文档
 ```
 
+```bash
+python main.py --gradio
+```
+
 ## 项目结构
 
 ```
