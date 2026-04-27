@@ -239,14 +239,14 @@ class RAGPipeline:
                 results = self.bm25_store.search(question, top_k=retrieval_k)
 
             # 过滤低质量结果
-            results = [r for r in results if r.get("score", 0) >= self.min_score]
+            # results = [r for r in results if r.get("score", 0) >= self.min_score]
         else:
             # 常规向量检索
             retrieval_k = self.rerank_top_k if self.use_reranker else self.top_k
             results = self.vector_store.search(question, top_k=retrieval_k, where=where)
 
             # 过滤低质量结果
-            results = [r for r in results if r["score"] >= self.min_score]
+            # results = [r for r in results if r["score"] >= self.min_score]
 
         # Step 2: Reranker 精排
         if self.use_reranker and self.reranker and len(results) > self.top_k:
@@ -254,7 +254,7 @@ class RAGPipeline:
             results = self.reranker.rerank(question, results, top_k=self.top_k)
 
             # Reranker 结果也需要过滤（可能重排后分数低于阈值）
-            results = [r for r in results if r.get("rerank_score", r.get("score", 0)) >= self.min_score]
+            # results = [r for r in results if r.get("rerank_score", r.get("score", 0)) >= self.min_score]
 
         logger.info(f"最终检索结果: {len(results)} 条")
 

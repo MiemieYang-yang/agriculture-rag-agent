@@ -10,3 +10,4 @@ chroma/
 .DS_Store
 *.zip
 .idea
+.env

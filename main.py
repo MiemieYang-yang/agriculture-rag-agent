@@ -116,14 +116,13 @@ def run_agent(stream: bool = False):
     Args:
         stream: 是否启用流式输出
     """
-    from core.agent.agent import AgricultureAgent, AgentContext
+    from core.agent.langgraph_agent import LangGraphAgent
 
-    logger.info("初始化 Agriculture Agent...")
-    agent = AgricultureAgent()
-    context = AgentContext()
+    logger.info("初始化 LangGraph Agent...")
+    agent = LangGraphAgent()
 
     print("\n" + "=" * 60)
-    print("  农业气候与资源数据专家助手（Agent 模式）")
+    print("  农业气候与资源数据专家助手（Agent 模式 - LangGraph）")
     print("  支持：天气查询、农学计算、知识库检索")
     if stream:
         print("  模式: 流式输出")
@@ -148,48 +147,43 @@ def run_agent(stream: bool = False):
             break
         if question.lower() in {"clear", "清除历史"}:
             history = []
-            context = AgentContext()
-            print("对话历史和上下文已清除\n")
+            print("对话历史已清除\n")
             continue
 
         try:
             # Agent 处理
-            result = agent.process(question, history=history if history else None, context=context)
+            result = agent.process(question, history=history if history else None)
 
             # 显示回答
-            print(f"\n助手: {result.answer}")
+            print(f"\n助手: {result.get('answer', '')}")
 
             # 显示工具调用信息
-            if result.tool_calls:
-                print(f"\n  🔧 工具调用（共 {len(result.tool_calls)} 次）:")
-                for tc in result.tool_calls:
-                    status = "✓" if tc.success else "✗"
-                    print(f"     {status} {tc.name}")
-                    if not tc.success:
-                        print(f"       错误: {tc.result.get('error', '未知错误')}")
+            tool_calls = result.get("tool_calls", [])
+            if tool_calls:
+                print(f"\n  🔧 工具调用（共 {len(tool_calls)} 次）:")
+                for tc in tool_calls:
+                    print(f"     ✓ {tc.get('name', 'unknown')}")
 
             # 显示引用来源
-            if result.sources:
-                print(f"\n  📄 引用来源（共 {len(result.sources)} 条）:")
-                for src in result.sources[:3]:  # 只显示前3条
+            sources = result.get("sources", [])
+            if sources:
+                print(f"\n  📄 引用来源（共 {len(sources)} 条）:")
+                for src in sources[:3]:
                     page_info = f" p.{src.get('page')}" if src.get('page') else ""
-                    print(f"     · {src.get('filename')}{page_info}")
-                    print(f"       {src.get('snippet', '')[:80]}...")
+                    print(f"     · {src.get('filename', '')}{page_info}")
 
             # 显示迭代次数
-            if result.iterations > 1:
-                print(f"\n  🔄 Agent 迭代次数: {result.iterations}")
+            iterations = result.get("iterations", 0)
+            if iterations > 1:
+                print(f"\n  🔄 Agent 迭代次数: {iterations}")
 
             print()
 
             # 维护对话历史
             history.extend([
                 {"role": "user", "content": question},
-                {"role": "assistant", "content": result.answer},
+                {"role": "assistant", "content": result.get("answer", "")},
             ])
-
-            # 更新上下文
-            context = result.context or context
 
             # 控制历史长度
             if len(history) > 20:

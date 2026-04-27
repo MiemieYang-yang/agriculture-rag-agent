@@ -24,7 +24,7 @@
 |------|------|------|
 | 向量模型 | BGE-M3 | 多语言，中文效果优秀 |
 | 向量数据库 | ChromaDB | 本地持久化，无需单独部署 |
-| 文本切分 | LangChain RecursiveCharacterTextSplitter | 语义感知切分，简历友好 |
+| 文本切分 | MarkdownHeaderTextSplitter + RecursiveCharacterTextSplitter | 标题层级感知切分，保留元数据 |
 | LLM | Qwen（通义千问） | 兼容 OpenAI 接口 |
 | API 框架 | FastAPI | 自带 Swagger 文档 |
 | 前端框架 | Streamlit | 快速构建交互式 Web 界面，界面更美观 |
@@ -173,6 +173,28 @@ agri_rag/
 ---
 
 ## 七、变更日志
+
+### v0.4.1 — 文档处理模块重构（标题层级保留）
+- 重构 `core/document_processor.py`：
+  - 新增 Word (.docx) 文档支持
+  - 使用 `mammoth` 库将 .docx 转换为 Markdown（Heading 1/2/3/4 → # ## ### ####）
+  - 目录行过滤（正则匹配 `.+[．.…]{2,}\d+\s*$` 格式行）
+  - 主切分器：`MarkdownHeaderTextSplitter`（识别 # ## ### #### 四级标题）
+  - 二次切分器：`RecursiveCharacterTextSplitter`（处理超长 chunk）
+  - 表格保护逻辑（二次切分时不切分 Markdown 表格）
+  - 新增元数据字段：`h1`, `h2`, `h3`, `h4`（标题层级文本）
+  - 过滤 Word 临时文件（以 `~$` 开头）
+- 更新 `requirements.txt`：添加 `mammoth>=1.6.0` 依赖
+- PDF/TXT 处理逻辑保持不变
+- 新增方法：
+  - `_load_docx()` / `_load_markdown()`：加载 Word/Markdown 文档
+  - `_convert_docx_to_markdown()`：mammoth 转换
+  - `_filter_toc_lines()`：过滤目录行
+  - `_split_with_headers()`：按标题层级切分
+  - `_split_oversized_chunk()`：超长 chunk 二次切分
+  - `_contains_table()` / `_extract_table_blocks()`：表格检测与分离
+  - `_clean_markdown()` / `_clean_header_text()`：文本清洗
+- 测试结果：Word 文档生成 2063 chunks，标题层级分布 h1:2056 / h2:2025 / h3:1991 / h4:9
 
 ### v0.4.0 — Phase 4 前端界面
 - 新增 `gradio_app.py`：Gradio 交互式 Web 界面（Gradio 6.0 兼容）

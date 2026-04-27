@@ -54,6 +54,9 @@ python main.py --serve
 ```bash
 python main.py --gradio
 ```
+```bash
+python main.py --streamlit
+```
 
 ## 项目结构
 

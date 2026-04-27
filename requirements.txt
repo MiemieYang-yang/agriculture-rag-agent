@@ -12,6 +12,7 @@ openai>=1.30.0
 pypdf>=4.0.0
 python-docx>=1.1.0
 tiktoken>=0.7.0
+mammoth>=1.6.0
 
 # API 服务
 fastapi>=0.111.0
@@ -33,6 +34,10 @@ datasets>=2.14.0
 langchain>=0.1.0
 langchain-openai>=0.1.0
 langchain-community>=0.0.10
+
+# LangGraph（Phase 3 Agent 框架）
+langgraph>=0.2.0
+langchain-core>=0.3.0
 
 # BM25 稀疏检索
 rank_bm25>=0.2.2

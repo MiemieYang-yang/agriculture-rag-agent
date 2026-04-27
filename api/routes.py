@@ -16,7 +16,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.rag_pipeline import RAGPipeline
-from core.agent.agent import AgricultureAgent, AgentContext
+from core.agent.langgraph_agent import LangGraphAgent
+from core.agent.agent import AgricultureAgent
 
 import logging
 
@@ -26,7 +27,7 @@ router = APIRouter()
 
 # RAG Pipeline 单例，避免每次请求重新初始化模型
 _pipeline: Optional[RAGPipeline] = None
-_agent: Optional[AgricultureAgent] = None
+_agent: Optional[LangGraphAgent] = None
 
 
 def get_pipeline() -> RAGPipeline:
@@ -36,11 +37,11 @@ def get_pipeline() -> RAGPipeline:
     return _pipeline
 
 
-def get_agent() -> AgricultureAgent:
-    """获取 Agent 单例"""
+def get_agent() -> LangGraphAgent:
+    """获取 LangGraph Agent 单例"""
     global _agent
     if _agent is None:
-        _agent = AgricultureAgent(rag_pipeline=get_pipeline())
+        _agent = LangGraphAgent(rag_pipeline=get_pipeline())
     return _agent
 
 
@@ -174,6 +175,7 @@ async def agent_query(req: AgentQueryRequest):
     - 支持工具调用（天气查询、农学计算、知识库检索）
     - 支持多轮追问
     - 自动判断是否需要调用工具
+    - 基于 LangGraph 实现 ReAct 循环
 
     流程：
     1. 接收问题
@@ -193,13 +195,13 @@ async def agent_query(req: AgentQueryRequest):
         # 构建响应
         tool_calls = [
             ToolCallInfo(
-                id=tc.get("id", ""),
+                id=tc.get("id", str(i)),
                 name=tc.get("name", ""),
                 arguments=tc.get("arguments", {}),
                 result=tc.get("result", {}),
-                success=tc.get("success", False),
+                success=tc.get("success", True),
             )
-            for tc in result.to_dict().get("tool_calls", [])
+            for i, tc in enumerate(result.get("tool_calls", []))
         ]
 
         sources = [
@@ -209,14 +211,14 @@ async def agent_query(req: AgentQueryRequest):
                 score=src.get("score", 0),
                 snippet=src.get("snippet", ""),
             )
-            for src in result.sources
+            for src in result.get("sources", [])
         ]
 
         return AgentQueryResponse(
-            answer=result.answer,
+            answer=result.get("answer", ""),
             tool_calls=tool_calls,
             sources=sources,
-            iterations=result.iterations,
+            iterations=result.get("iterations", 0),
         )
 
     except Exception as e:
@@ -229,16 +231,10 @@ async def list_tools():
     """列出 Agent 可用的所有工具"""
     try:
         agent = get_agent()
-        tools = agent.tool_registry.get_all_tools()
+        tools = agent.get_tools_info()
         return {
-            "tools": [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters_schema,
-                }
-                for tool in tools
-            ]
+            "tools": tools,
+            "framework": "LangGraph"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
