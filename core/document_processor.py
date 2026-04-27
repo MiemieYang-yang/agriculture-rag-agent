@@ -233,7 +233,8 @@ class DocumentProcessor:
         1. mammoth 将 .docx 转为 Markdown
         2. 过滤目录行
         3. 清洗文本
-        4. 按标题层级切分
+        4. 保存转换后的 md 文件（可选）
+        5. 按标题层级切分
         """
         try:
             import mammoth
@@ -251,6 +252,11 @@ class DocumentProcessor:
 
         if not markdown_text.strip():
             return []
+
+        # 保存转换后的 md 文件
+        saved_md_path = self._save_converted_markdown(markdown_text, fp)
+        if saved_md_path:
+            logger.info(f"已保存转换后的 Markdown: {saved_md_path}")
 
         # 构建基础元数据
         base_metadata = {
@@ -286,6 +292,36 @@ class DocumentProcessor:
                     logger.warning(f"mammoth 转换警告 [{fp.name}]: {msg}")
 
         return markdown_text
+
+    def _save_converted_markdown(self, markdown_text: str, original_fp: Path) -> str:
+        """
+        保存转换后的 Markdown 文件到 data/processed 目录。
+        
+        Args:
+            markdown_text: 转换后的 Markdown 文本
+            original_fp: 原始 docx 文件路径
+            
+        Returns:
+            保存的文件路径，如果保存失败则返回空字符串
+        """
+        try:
+            # 创建 processed 目录
+            project_root = Path(__file__).parent.parent
+            processed_dir = project_root / "data" / "processed"
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 生成 md 文件名（保持原名，只改后缀）
+            md_filename = original_fp.stem + ".md"
+            md_path = processed_dir / md_filename
+            
+            # 写入文件
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(markdown_text)
+            
+            return str(md_path)
+        except Exception as e:
+            logger.warning(f"保存 Markdown 文件失败: {e}")
+            return ""
 
     def _filter_toc_lines(self, text: str) -> str:
         """

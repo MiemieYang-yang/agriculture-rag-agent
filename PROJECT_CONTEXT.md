@@ -173,7 +173,8 @@ agri_rag/
 ---
 
 ## 七、变更日志
-
+### v0.4.2 — 保留doc转md内容
+- 保留doc转md内容，不丢弃
 ### v0.4.1 — 文档处理模块重构（标题层级保留）
 - 重构 `core/document_processor.py`：
   - 新增 Word (.docx) 文档支持
