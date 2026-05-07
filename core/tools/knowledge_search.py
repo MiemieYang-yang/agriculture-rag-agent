@@ -69,9 +69,10 @@ class KnowledgeSearchTool(BaseTool):
 
         if not query:
             return ToolResult(
+                name=self.name,
                 success=False,
-                data=None,
-                error_message="检索查询不能为空",
+                summary="",
+                error="检索查询不能为空",
             )
 
         try:
@@ -106,23 +107,36 @@ class KnowledgeSearchTool(BaseTool):
 
             logger.info(f"知识库检索完成: 查询='{query[:30]}...', 结果数={retrieved_count}")
 
+            # 生成摘要
+            summary = self._generate_summary(query, retrieved_count, sources)
+
             return ToolResult(
+                name=self.name,
                 success=True,
+                summary=summary,
                 data=search_result,
-                metadata={
-                    "query": query,
-                    "top_k": top_k,
-                    "retrieved_count": retrieved_count,
-                }
             )
 
         except Exception as e:
             logger.error(f"知识库检索失败: {e}")
             return ToolResult(
+                name=self.name,
                 success=False,
-                data=None,
-                error_message=f"知识库检索失败: {str(e)}",
+                summary="",
+                error=f"知识库检索失败: {str(e)}",
             )
+
+    def _generate_summary(self, query: str, count: int, sources: List[Dict]) -> str:
+        """生成给 LLM 的检索摘要"""
+        if count == 0:
+            return f"知识库中未找到与「{query}」相关的信息。"
+
+        summary_parts = [f"知识库检索到 {count} 条相关结果："]
+        for i, src in enumerate(sources[:3], 1):
+            filename = src.get("filename", "未知来源")
+            snippet = src.get("snippet", "")[:100]
+            summary_parts.append(f"{i}. {filename}: {snippet}...")
+        return "\n".join(summary_parts)
 
     def search_only(self, query: str, top_k: int = 5) -> List[Dict]:
         """

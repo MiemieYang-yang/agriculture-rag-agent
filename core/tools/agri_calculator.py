@@ -139,24 +139,31 @@ class AgriCalculatorTool(BaseTool):
                 result = self._estimate_growing_period(kwargs)
             else:
                 return ToolResult(
+                    name=self.name,
                     success=False,
-                    data=None,
-                    error_message=f"不支持的计算类型: {calc_type}",
+                    summary="",
+                    error=f"不支持的计算类型: {calc_type}",
                 )
 
             logger.info(f"农学计算成功: {calc_type}")
+
+            # 生成摘要
+            summary = result.get("explanation", f"{calc_type} 计算完成")
+
             return ToolResult(
+                name=self.name,
                 success=True,
+                summary=summary,
                 data=result,
-                metadata={"calculation_type": calc_type}
             )
 
         except Exception as e:
             logger.error(f"农学计算失败: {e}")
             return ToolResult(
+                name=self.name,
                 success=False,
-                data=None,
-                error_message=f"计算失败: {str(e)}",
+                summary="",
+                error=f"计算失败: {str(e)}",
             )
 
     def _calculate_gdd(self, kwargs: Dict) -> Dict:

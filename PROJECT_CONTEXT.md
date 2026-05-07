@@ -6,11 +6,6 @@
 ---
 
 ## 一、背景与目标
-
-**求职方向：** 大模型 Agent 应用开发岗（大厂）
-**核心困境：** 缺乏实际项目经验，只有从 GitHub 拿来的简单智能客服项目，竞争力不足
-**解决策略：** 自主开发「基于 RAG 架构的农业气候与资源数据专家助手」，迭代式开发，每完成一个阶段就更新简历
-
 **项目定位：**
 - 垂直领域 RAG 系统（农业气候 + 作物种植 + 资源数据）
 - 不追求一步到位，每阶段完成后可独立演示、独立写进简历
@@ -38,13 +33,24 @@
 agri_rag/
 ├── core/
 │   ├── config.py               # 统一配置，所有参数从 .env 读取
-│   ├── document_processor.py   # 文档加载（PDF/TXT/MD）+ 切分
+│   ├── container.py            # 依赖注入容器，统一管理重型依赖 ★新增
+│   ├── document_processor.py   # 文档加载（PDF/TXT/MD/DOCX）+ 标题层级切分
 │   ├── embedder.py             # BGE-M3 向量化（懒加载）
 │   ├── vector_store.py         # ChromaDB 写入 / 检索 / MD5去重
 │   ├── llm_client.py           # Qwen 同步 + 流式调用
-│   └── rag_pipeline.py         # 核心 RAG 链路 ★
+│   ├── rag_pipeline.py         # 核心 RAG 链路 ★
+│   ├── tools/                  # 工具模块 ★改造
+│   │   ├── base.py             # ToolResult（统一返回格式）+ BaseTool 抽象基类
+│   │   ├── weather_tool.py     # 天气查询工具
+│   │   ├── agri_calculator.py  # 农学计算工具
+│   │   └── knowledge_search.py # 知识库检索工具
+│   └── agent/                  # Agent 模块
+│       ├── agent.py            # AgricultureAgent（ReAct 循环）
+│       ├── langgraph_agent.py  # LangGraph Agent 实现
+│       ├── tool_registry.py    # 工具注册中心（自动发现）★改造
+│       └── prompts.py          # Agent Prompt 模板
 ├── api/
-│   └── routes.py               # FastAPI 接口
+│   └── routes.py               # FastAPI 接口（使用 Container）
 ├── data/
 │   └── raw/                    # 原始文档目录
 │       └── crop_climate_guide.md  # 示例农业文档
@@ -66,7 +72,8 @@ agri_rag/
 **目标：** 跑通完整链路，能演示，能回答真实农业问题
 
 **已实现功能：**
-- 文档处理：支持 PDF / TXT / MD 加载，RecursiveCharacterTextSplitter 切分（chunk_size=512, overlap=64）
+- 文档处理：支持 PDF / TXT / MD / DOCX 加载，MarkdownHeaderTextSplitter 按标题层级切分 + RecursiveCharacterTextSplitter 处理超长段落（chunk_size=512, overlap=64）
+- 标题层级保留：Word/Markdown 文档自动提取 h1/h2/h3/h4 标题存入元数据，为元数据过滤和混合检索打基础
 - 向量化：BGE-M3 批量编码，L2 归一化，懒加载
 - 向量库：ChromaDB cosine 索引，MD5 去重，元数据过滤预留
 - RAG 链路：Query → 检索 → 相似度过滤（< 0.4 丢弃）→ Prompt 拼接 → Qwen 生成
@@ -79,7 +86,7 @@ agri_rag/
 ---
 
 ### Phase 2 · 检索优化 ✅ 已完成
-**目标：** 有数据、有对比、能量化改进效果（面试最大亮点）
+**目标：** 有数据、有对比、能量化改进效果
 
 **已实现功能：**
 - 评估测试集：50 条农业领域 Q&A 对，覆盖气候资源、区划、作物发育期等主题
@@ -106,28 +113,32 @@ agri_rag/
 
 **已实现功能：**
 - 工具封装：天气查询（模拟数据）、农学指标计算（积温/降水）、知识库检索
+- 工具自动发现：扫描 `core/tools/` 包，自动注册继承 `BaseTool` 的工具类
 - Qwen Tool Calling：扩展 llm_client.py 支持 chat_with_tools() 和 submit_tool_results()
 - ReAct 循环：意图识别 → 工具路由 → 执行 → 结果整合 → 回复
 - 多轮追问：AgentContext 维护作物/地点/时间实体，支持"那玉米呢？"追问
+- ToolResult 统一格式：成功状态、LLM 摘要、前端结构化数据、错误信息分离
 - 异常处理：最大迭代次数限制（5次）、工具执行异常捕获、参数校验
 
-**新增文件：**
-- `core/tools/base.py`：工具基类定义（ToolResult、BaseTool）
+**核心文件：**
+- `core/tools/base.py`：ToolResult（统一返回格式）+ BaseTool（抽象基类 + safe_run）
 - `core/tools/weather_tool.py`：天气查询工具（模拟中国主要农业城市数据）
 - `core/tools/agri_calculator.py`：农学计算工具（积温、降水统计、发育期推算）
 - `core/tools/knowledge_search.py`：知识库检索工具
 - `core/agent/agent.py`：Agent 核心逻辑（ReAct 循环、多轮追问）
-- `core/agent/tool_registry.py`：工具注册中心
+- `core/agent/langgraph_agent.py`：LangGraph Agent 实现（StateGraph + ToolNode）
+- `core/agent/tool_registry.py`：工具注册中心（discover 自动发现）
 - `core/agent/prompts.py`：Agent Prompt 模板
 
 **扩展文件：**
+- `core/container.py`：依赖注入容器，统一管理 Agent 及其依赖
 - `core/llm_client.py`：添加 chat_with_tools() 和 submit_tool_results() 方法
 - `core/config.py`：添加 AGENT_MAX_ITERATIONS、AGENT_ENABLE_TOOLS 等配置
-- `api/routes.py`：添加 /api/agent/query 和 /api/agent/tools 接口
-- `main.py`：添加 --agent 参数，支持 Agent CLI 模式
+- `api/routes.py`：添加 /api/agent/query 和 /api/agent/tools 接口，使用 container
+- `main.py`：添加 --agent 参数，支持 Agent CLI 模式，接入 FastAPI lifespan
 
 **此阶段简历写法：**
-> 在 RAG 基础上引入 Agent 能力，封装天气查询、农学指标计算等工具，基于 Qwen Tool Calling 实现意图识别 → 工具路由 → 结果整合的自主决策流程，支持多轮追问，处理工具调用异常与格式校验，最大迭代次数限制防止无限循环。
+> 在 RAG 基础上引入 Agent 能力，封装天气查询、农学指标计算等工具，基于 Qwen Tool Calling 实现意图识别 → 工具路由 → 结果整合的自主决策流程。设计工具自动发现机制（pkgutil + inspect），新增工具零侵入注册；实现 ToolResult 统一返回格式，LLM 摘要与前端数据分离；使用依赖注入容器统一管理组件生命周期，支持多轮追问，处理工具调用异常与格式校验。
 
 ---
 
@@ -148,7 +159,7 @@ agri_rag/
 
 ---
 
-## 五、关键设计决策（面试时重点讲）
+## 五、关键设计决策
 
 | 决策点 | 做法 | 为什么这样做 |
 |--------|------|--------------|
@@ -173,6 +184,51 @@ agri_rag/
 ---
 
 ## 七、变更日志
+### v0.4.3 — 架构重构（工具自动发现 + 依赖注入容器 + ToolResult 统一格式）
+**改造项一：工具自动发现机制**
+- 重构 `core/agent/tool_registry.py`：
+  - 新增 `discover()` 类方法，自动扫描 `core.tools` 包下所有模块
+  - 通过 `pkgutil.walk_packages` + `inspect` 动态发现继承 `BaseTool` 的非抽象类
+  - 实例化并自动注册到 Registry
+  - 跳过 `base.py` 模块（只定义基类）
+- 修改 `core/agent/agent.py`：
+  - 初始化时改用 `ToolRegistry.discover(tools_package)` 自动发现
+- 修改 `core/tools/__init__.py`：
+  - 简化导出，只导出 `BaseTool` 和 `ToolResult`
+
+**改造项二：依赖注入容器**
+- 新增 `core/container.py`：
+  - 统一管理所有重型依赖（Embedder、VectorStore、LLMClient、Agent 等）
+  - 基于 `@property` 懒加载，按需初始化
+  - 提供 `startup()` / `shutdown()` 生命周期方法
+  - 全局单例 `container` 供 API 层访问
+- 修改 `api/routes.py`：
+  - 删除全局 `_pipeline` / `_agent` 懒加载变量
+  - 改用 `container.rag_pipeline` / `container.langgraph_agent`
+- 修改 `main.py`：
+  - 接入 FastAPI `lifespan` 上下文管理器
+  - CLI/Agent 模式也改用 container 获取依赖
+
+**改造项三：ToolResult 统一返回格式**
+- 重构 `core/tools/base.py`：
+  - `ToolResult` 新增字段：`name`（工具名）、`summary`（给 LLM 的摘要）、`error`（错误描述）
+  - 新增 `to_prompt_text()` 方法：成功返回 summary，失败返回带标记的错误信息
+  - `BaseTool` 新增 `safe_run()` 方法：捕获未预期异常，确保不抛出
+- 修改所有工具文件：
+  - `weather_tool.py`：返回新格式 ToolResult，新增 `_generate_summary()` 方法
+  - `agri_calculator.py`：返回新格式 ToolResult
+  - `knowledge_search.py`：返回新格式 ToolResult，新增 `_generate_summary()` 方法
+- 修改 `core/agent/agent.py`：
+  - 工具执行后使用 `ToolResult.to_prompt_text()` 写入 messages
+  - `ToolCallRecord` 使用 `ToolResult.to_dict()` 存储结果
+- 修改 `core/agent/langgraph_agent.py`：
+  - 工具函数返回 `result.summary` 给 LLM
+
+**设计亮点：**
+- 工具系统遵循开闭原则，新增工具零侵入，系统自动发现注册
+- 依赖注入容器统一管理组件生命周期，FastAPI 启动/关闭时有序初始化和释放
+- 工具返回结构化 ToolResult，LLM 摘要与前端数据分离，支持工具调用链路可视化
+
 ### v0.4.2 — 保留doc转md内容
 - 保留doc转md内容，不丢弃
 ### v0.4.1 — 文档处理模块重构（标题层级保留）
@@ -265,4 +321,3 @@ agri_rag/
 
 ### v0.1.2 — 文本切分策略说明更新
 - 明确文本切分使用 LangChain `RecursiveCharacterTextSplitter`（替换原自实现版本）
-- 简历描述更新，使用业界通用术语

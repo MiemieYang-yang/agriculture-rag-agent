@@ -264,8 +264,6 @@ def generate_comparison_report(results: Dict, output_file: Path):
             report.append(f"- 总分从 {baseline_score * 50:.2f}% 提升至 {best_config[1] * 50:.2f}%")
             report.append(f"- 绝对提升 {improvement:.2f}%")
 
-    # 简历描述建议
-    report.append("\n## 简历描述建议")
     report.append("\n```")
     report.append("构建 50 条农业领域评估集，引入 HyDE 与 BGE-Reranker 对检索链路优化，")
     report.append("Answer Relevancy 从 X% 提升至 Y%，Context Recall 提升 Z 个百分点，")

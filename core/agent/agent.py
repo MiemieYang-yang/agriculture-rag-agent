@@ -20,6 +20,10 @@ from core.llm_client import QwenClient
 from core.rag_pipeline import RAGPipeline
 from core.agent.tool_registry import ToolRegistry
 from core.agent.prompts import AGENT_SYSTEM_PROMPT, build_agent_prompt
+from core.tools.base import ToolResult
+
+# 导入工具包用于自动发现
+import core.tools as tools_package
 
 logger = logging.getLogger(__name__)
 
@@ -161,12 +165,19 @@ class AgricultureAgent:
         Args:
             rag_pipeline: RAG Pipeline 实例（用于知识库检索工具）
             llm_client: LLM 客户端
-            tool_registry: 工具注册中心
+            tool_registry: 工具注册中心（如不传入则自动发现）
             max_iterations: 最大迭代次数（防止无限循环）
         """
         self.llm_client = llm_client or QwenClient()
         self.rag_pipeline = rag_pipeline
-        self.tool_registry = tool_registry or ToolRegistry()
+
+        # 使用自动发现机制注册工具
+        if tool_registry is None:
+            self.tool_registry = ToolRegistry.discover(tools_package)
+            logger.info("使用工具自动发现机制")
+        else:
+            self.tool_registry = tool_registry
+
         self.max_iterations = max_iterations
 
         # 如果提供了 RAG Pipeline，更新知识库检索工具
@@ -283,7 +294,7 @@ class AgricultureAgent:
                         except json.JSONDecodeError:
                             arguments = {}
 
-                        # 执行工具
+                        # 执行工具（返回 ToolResult）
                         tool_result = self.tool_registry.execute_tool(tool_name, **arguments)
 
                         # 记录工具调用
@@ -291,8 +302,8 @@ class AgricultureAgent:
                             id=tool_id,
                             name=tool_name,
                             arguments=arguments,
-                            result=tool_result,
-                            success=tool_result.get("success", False),
+                            result=tool_result.to_dict(),
+                            success=tool_result.success,
                         )
                         result.tool_calls.append(record)
 
@@ -300,12 +311,12 @@ class AgricultureAgent:
                         tool_results.append({
                             "tool_call_id": tool_id,
                             "name": tool_name,
-                            "result": json.dumps(tool_result, ensure_ascii=False),
+                            "result": tool_result.to_prompt_text(),  # 给 LLM 的摘要
                         })
 
                         # 如果是知识库检索，收集来源
-                        if tool_name == "knowledge_search" and tool_result.get("success"):
-                            sources = tool_result.get("data", {}).get("sources", [])
+                        if tool_name == "knowledge_search" and tool_result.success:
+                            sources = tool_result.data.get("sources", [])
                             result.sources.extend(sources)
 
                     # 提交工具结果给 LLM

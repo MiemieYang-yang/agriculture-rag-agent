@@ -1,11 +1,15 @@
 """
 工具注册中心
 管理所有工具实例，生成 OpenAI tool schema
+支持自动发现和注册工具
 """
-from typing import Dict, List, Optional, Type
+from typing import Dict, List, Optional
+import pkgutil
+import importlib
+import inspect
 import logging
 
-from core.tools.base import BaseTool
+from core.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -16,41 +20,62 @@ class ToolRegistry:
 
     功能：
     - 注册和管理工具实例
+    - 自动发现 tools_package 包下的所有工具类
     - 生成 OpenAI tool calling schema
     - 根据 tool_name 获取工具
     """
 
-    def __init__(self, tools: Optional[List[BaseTool]] = None):
+    def __init__(self):
         """
         初始化工具注册中心
-
-        Args:
-            tools: 工具列表，默认注册所有内置工具
         """
         self._tools: Dict[str, BaseTool] = {}
 
-        if tools:
-            for tool in tools:
-                self.register(tool)
-        else:
-            # 默认注册所有内置工具
-            self._register_default_tools()
+    @classmethod
+    def discover(cls, tools_package) -> "ToolRegistry":
+        """
+        自动发现并注册工具
 
-    def _register_default_tools(self):
-        """注册默认工具"""
-        try:
-            from core.tools.weather_tool import WeatherTool
-            from core.tools.agri_calculator import AgriCalculatorTool
-            from core.tools.knowledge_search import KnowledgeSearchTool
+        自动扫描 tools_package 包下所有模块，
+        找到继承 BaseTool 的非抽象类并实例化注册
 
-            self.register(WeatherTool())
-            self.register(AgriCalculatorTool())
-            # KnowledgeSearchTool 需要延迟初始化（依赖 RAG Pipeline）
-            self.register(KnowledgeSearchTool())
+        Args:
+            tools_package: 工具模块包（如 core.tools）
 
-            logger.info(f"已注册 {len(self._tools)} 个默认工具")
-        except Exception as e:
-            logger.warning(f"注册默认工具失败: {e}")
+        Returns:
+            ToolRegistry: 包含所有自动发现工具的注册中心
+        """
+        registry = cls()
+
+        logger.info(f"开始自动发现工具，扫描路径: {tools_package.__path__}")
+
+        for _, module_name, _ in pkgutil.walk_packages(
+            tools_package.__path__,
+            prefix=tools_package.__name__ + "."
+        ):
+            # 跳过 base.py（只定义基类）
+            if module_name.endswith(".base"):
+                continue
+
+            try:
+                module = importlib.import_module(module_name)
+                for _, obj in inspect.getmembers(module, inspect.isclass):
+                    # 检查是否是 BaseTool 的子类（但不是 BaseTool 本身，也不是抽象类）
+                    if (
+                        issubclass(obj, BaseTool)
+                        and obj is not BaseTool
+                        and not inspect.isabstract(obj)
+                    ):
+                        # 确保类是在该模块中定义的（不是从其他模块导入的）
+                        if obj.__module__ == module_name:
+                            instance = obj()
+                            registry.register(instance)
+                            logger.info(f"自动发现工具: {instance.name} ({module_name})")
+            except Exception as e:
+                logger.warning(f"扫描模块 {module_name} 时出错: {e}")
+
+        logger.info(f"工具自动发现完成，共发现 {len(registry._tools)} 个工具")
+        return registry
 
     def register(self, tool: BaseTool):
         """
@@ -103,7 +128,7 @@ class ToolRegistry:
         """列出所有工具名称"""
         return list(self._tools.keys())
 
-    def execute_tool(self, tool_name: str, **kwargs) -> Dict:
+    def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
         """
         执行指定工具
 
@@ -112,38 +137,34 @@ class ToolRegistry:
             **kwargs: 工具参数
 
         Returns:
-            工具执行结果（Dict 格式）
+            ToolResult: 工具执行结果
         """
         tool = self.get_tool(tool_name)
         if tool is None:
             logger.error(f"工具不存在: {tool_name}")
-            return {
-                "success": False,
-                "error": f"工具 {tool_name} 不存在",
-            }
+            return ToolResult(
+                name=tool_name,
+                success=False,
+                summary="",
+                error=f"工具 {tool_name} 不存在",
+            )
 
-        try:
-            # 验证参数
-            error = tool.validate_parameters(kwargs)
-            if error:
-                logger.warning(f"工具参数验证失败: {error}")
-                return {
-                    "success": False,
-                    "error": error,
-                }
+        # 验证参数
+        error = tool.validate_parameters(kwargs)
+        if error:
+            logger.warning(f"工具参数验证失败: {error}")
+            return ToolResult(
+                name=tool_name,
+                success=False,
+                summary="",
+                error=error,
+            )
 
-            # 执行工具
-            result = tool.execute(**kwargs)
-            logger.info(f"工具 {tool_name} 执行完成: success={result.success}")
+        # 使用 safe_run 执行工具（捕获异常）
+        result = tool.safe_run(**kwargs)
+        logger.info(f"工具 {tool_name} 执行完成: success={result.success}")
 
-            return result.to_dict()
-
-        except Exception as e:
-            logger.error(f"工具 {tool_name} 执行异常: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-            }
+        return result
 
     def __len__(self) -> int:
         return len(self._tools)

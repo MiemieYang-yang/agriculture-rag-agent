@@ -24,14 +24,14 @@ logger = logging.getLogger(__name__)
 
 def run_cli(stream: bool = False):
     """命令行交互模式：直接在终端问答
-    
+
     Args:
         stream: 是否启用流式输出
     """
-    from core.rag_pipeline import RAGPipeline
+    from core.container import container
 
     logger.info("初始化 RAG Pipeline...")
-    pipeline = RAGPipeline()
+    pipeline = container.rag_pipeline
 
     if pipeline.vector_store.count() == 0:
         logger.warning("知识库为空！请先运行: python ingest.py")
@@ -116,10 +116,10 @@ def run_agent(stream: bool = False):
     Args:
         stream: 是否启用流式输出
     """
-    from core.agent.langgraph_agent import LangGraphAgent
+    from core.container import container
 
     logger.info("初始化 LangGraph Agent...")
-    agent = LangGraphAgent()
+    agent = container.langgraph_agent
 
     print("\n" + "=" * 60)
     print("  农业气候与资源数据专家助手（Agent 模式 - LangGraph）")
@@ -197,14 +197,24 @@ def run_agent(stream: bool = False):
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     """API 服务模式：启动 FastAPI"""
     import uvicorn
+    from contextlib import asynccontextmanager
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from api.routes import router
+    from core.container import container
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """FastAPI 生命周期管理"""
+        await container.startup()
+        yield
+        await container.shutdown()
 
     app = FastAPI(
         title="农业气候与资源数据专家助手 API",
         description="基于 RAG 架构的农业领域智能问答系统",
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     # 允许跨域（方便本地前端调试）

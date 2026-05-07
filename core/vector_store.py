@@ -49,7 +49,7 @@ class VectorStore:
         os.makedirs(persist_dir, exist_ok=True)
         self.client = chromadb.PersistentClient(
             path=persist_dir,
-            settings=Settings(anonymized_telemetry=False),
+            settings=Settings(anonymized_telemetry=False),# 不向 ChromaDB 官方发送使用统计信息
         )
 
         # 获取或创建 collection

@@ -12,19 +12,40 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolResult:
-    """工具执行结果"""
+    """
+    工具执行结果（统一返回格式）
+
+    设计原则：
+    - name: 工具名，便于日志和追踪
+    - success: 执行是否成功
+    - summary: 给 LLM 看的自然语言摘要（拼进 Prompt）
+    - data: 给前端展示的结构化数据
+    - error: 失败时的错误描述
+    """
+    name: str
     success: bool
-    data: Any
-    error_message: Optional[str] = None
-    metadata: Optional[Dict] = field(default_factory=dict)  # 额外信息（如 API 耗时）
+    summary: str                                    # 给 LLM 的文本
+    data: Dict[str, Any] = field(default_factory=dict)  # 给前端的结构化数据
+    error: str = ""                                 # 失败时的错误描述
 
     def to_dict(self) -> Dict:
+        """序列化为字典（兼容旧接口）"""
         return {
             "success": self.success,
             "data": self.data,
-            "error_message": self.error_message,
-            "metadata": self.metadata,
+            "summary": self.summary,
+            "error": self.error,
+            "name": self.name,
         }
+
+    def to_prompt_text(self) -> str:
+        """
+        拼进 LLM Prompt 时使用
+        成功返回 summary，失败返回带标记的错误信息
+        """
+        if self.success:
+            return self.summary
+        return f"[工具执行失败] {self.name}: {self.error}"
 
 
 class BaseTool(ABC):
@@ -100,9 +121,26 @@ class BaseTool(ABC):
             **kwargs: 工具参数，由 LLM 生成
 
         Returns:
-            ToolResult: 执行结果
+            ToolResult: 执行结果（不抛异常，错误通过 ToolResult.success=False 表达）
         """
         pass
+
+    def safe_run(self, **kwargs) -> ToolResult:
+        """
+        Agent 统一调用入口，捕获未预期异常
+
+        确保工具执行不会抛出异常，所有错误都通过 ToolResult 返回
+        """
+        try:
+            return self.execute(**kwargs)
+        except Exception as e:
+            logger.error(f"工具 {self.name} 执行异常: {e}")
+            return ToolResult(
+                name=self.name,
+                success=False,
+                summary="",
+                error=str(e),
+            )
 
     def validate_parameters(self, kwargs: Dict) -> Optional[str]:
         """

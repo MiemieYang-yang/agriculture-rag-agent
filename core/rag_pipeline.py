@@ -2,8 +2,6 @@
 RAG 核心链路
 串联：Query → 检索 → 构建 Prompt → LLM 生成 → 返回结果
 
-这是整个项目最核心的文件，面试时重点讲这里的设计思路
-
 Phase 2 检索优化：
 - HyDE：假设文档嵌入
 - Reranker：BGE-Reranker-v2 重排序

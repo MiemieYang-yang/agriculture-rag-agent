@@ -15,34 +15,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from core.rag_pipeline import RAGPipeline
-from core.agent.langgraph_agent import LangGraphAgent
-from core.agent.agent import AgricultureAgent
+from core.container import container
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# RAG Pipeline 单例，避免每次请求重新初始化模型
-_pipeline: Optional[RAGPipeline] = None
-_agent: Optional[LangGraphAgent] = None
-
-
-def get_pipeline() -> RAGPipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = RAGPipeline()
-    return _pipeline
-
-
-def get_agent() -> LangGraphAgent:
-    """获取 LangGraph Agent 单例"""
-    global _agent
-    if _agent is None:
-        _agent = LangGraphAgent(rag_pipeline=get_pipeline())
-    return _agent
 
 
 # ── 数据模型 ─────────────────────────────────────────────────────────────────
@@ -110,7 +89,7 @@ async def query(req: QueryRequest):
     """
     if req.stream:
         # 流式响应
-        pipeline = get_pipeline()
+        pipeline = container.rag_pipeline
 
         async def event_generator():
             for token in pipeline.query_stream(req.question):
@@ -120,7 +99,7 @@ async def query(req: QueryRequest):
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
     try:
-        pipeline = get_pipeline()
+        pipeline = container.rag_pipeline
         result = pipeline.query(req.question)
         return QueryResponse(**result)
     except Exception as e:
@@ -135,7 +114,7 @@ async def chat(req: ChatRequest):
     前端需要在每次请求中携带完整对话历史
     """
     try:
-        pipeline = get_pipeline()
+        pipeline = container.rag_pipeline
         result = pipeline.query(req.question, history=req.history)
 
         # 更新对话历史
@@ -154,7 +133,7 @@ async def chat(req: ChatRequest):
 async def stats():
     """查看当前知识库状态"""
     try:
-        pipeline = get_pipeline()
+        pipeline = container.rag_pipeline
         return {
             "total_documents": pipeline.vector_store.count(),
             "collection": pipeline.vector_store.collection_name,
@@ -184,7 +163,7 @@ async def agent_query(req: AgentQueryRequest):
     4. 返回最终答案 + 工具调用记录
     """
     try:
-        agent = get_agent()
+        agent = container.langgraph_agent
 
         # 执行 Agent
         result = agent.process(
@@ -230,7 +209,7 @@ async def agent_query(req: AgentQueryRequest):
 async def list_tools():
     """列出 Agent 可用的所有工具"""
     try:
-        agent = get_agent()
+        agent = container.langgraph_agent
         tools = agent.get_tools_info()
         return {
             "tools": tools,

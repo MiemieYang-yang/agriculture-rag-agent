@@ -192,9 +192,10 @@ class WeatherTool(BaseTool):
         if city_normalized not in MOCK_WEATHER_DATA:
             available_cities = list(MOCK_WEATHER_DATA.keys())
             return ToolResult(
+                name=self.name,
                 success=False,
-                data=None,
-                error_message=f"暂不支持查询该城市的天气。支持的城市：{', '.join(available_cities)}",
+                summary="",
+                error=f"暂不支持查询该城市的天气。支持的城市：{', '.join(available_cities)}",
             )
 
         weather_data = MOCK_WEATHER_DATA[city_normalized]
@@ -206,18 +207,24 @@ class WeatherTool(BaseTool):
                 result = self._get_current_weather(weather_data, city_normalized, date)
 
             logger.info(f"天气查询成功: {city_normalized}, {info_type}")
+
+            # 生成给 LLM 的摘要
+            summary = self._generate_summary(result, city_normalized, info_type)
+
             return ToolResult(
+                name=self.name,
                 success=True,
+                summary=summary,
                 data=result,
-                metadata={"city": city_normalized, "date": date, "info_type": info_type}
             )
 
         except Exception as e:
             logger.error(f"天气查询失败: {e}")
             return ToolResult(
+                name=self.name,
                 success=False,
-                data=None,
-                error_message=f"天气查询失败: {str(e)}",
+                summary="",
+                error=f"天气查询失败: {str(e)}",
             )
 
     def _normalize_city_name(self, city: str) -> str:
@@ -287,3 +294,24 @@ class WeatherTool(BaseTool):
             tips.append("天气晴好，适合田间作业")
 
         return "；".join(tips) if tips else "天气条件适中，正常开展农事活动即可。"
+
+    def _generate_summary(self, result: Dict, city: str, info_type: str) -> str:
+        """生成给 LLM 的天气摘要"""
+        if info_type == "forecast":
+            forecast = result.get("forecast", [])
+            summary_parts = [f"{city}天气预报："]
+            for day in forecast:
+                summary_parts.append(
+                    f"{day['date']}: {day['weather']}，{day['low']}~{day['high']}℃"
+                )
+            return "\n".join(summary_parts)
+        else:
+            temp = result.get("temperature", {})
+            return (
+                f"{city}{result.get('date', '今天')}天气：{result.get('weather', '')}，"
+                f"当前气温{temp.get('current', 0)}℃，"
+                f"最高{temp.get('high', 0)}℃，最低{temp.get('low', 0)}℃，"
+                f"湿度{result.get('humidity', '')}，风力{result.get('wind', '')}，"
+                f"降水量{result.get('rainfall', '')}。"
+                f"农业建议：{result.get('agriculture_tip', '')}"
+            )
