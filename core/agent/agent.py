@@ -130,7 +130,7 @@ class ToolCallRecord:
 @dataclass
 class AgentResult:
     """Agent 执行结果"""
-    answer: str
+    answer: str = ""  # 提供默认值
     tool_calls: List[ToolCallRecord] = field(default_factory=list)
     sources: List[Dict] = field(default_factory=list)
     iterations: int = 0

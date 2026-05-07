@@ -209,7 +209,7 @@ class VectorStore:
             retrieved.append({
                 "content": doc,
                 "metadata": meta,
-                "score": round(1 - dist, 4),
+                "score": round(1 - dist, 4),    # 将距离转换为相似度分数
             })
 
         logger.debug(f"向量检索到 {len(retrieved)} 条，最高分: {retrieved[0]['score'] if retrieved else 'N/A'}")

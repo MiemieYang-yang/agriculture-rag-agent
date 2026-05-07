@@ -5,17 +5,20 @@ FastAPI 接口层
 接口列表：
 - POST /api/query      → 单次 RAG 问答
 - POST /api/chat       → 多轮对话
+- POST /api/chat/stream → 多轮对话（流式）
 - POST /api/agent/query → Agent 智能问答（支持工具调用）
 - GET  /api/stats      → 知识库统计
 - GET  /health         → 健康检查
 """
 from typing import List, Optional, Dict
+import json
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.container import container
+from core.config import cfg
 
 import logging
 
@@ -127,6 +130,76 @@ async def chat(req: ChatRequest):
     except Exception as e:
         logger.error(f"对话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat/stream", summary="多轮对话（流式）")
+async def chat_stream(req: ChatRequest):
+    """
+    支持流式输出的多轮对话接口
+    
+    使用 Server-Sent Events (SSE) 格式：
+    - event: sources - 返回引用来源（可选）
+    - event: chunk - 返回文本片段
+    - event: done - 对话完成，包含完整答案和历史
+    - event: error - 错误信息
+    
+    前端使用 EventSource 或 fetch + ReadableStream 接收
+    """
+    async def generate():
+        try:
+            pipeline = container.rag_pipeline
+            
+            # 先执行检索（同步）
+            retrieved = pipeline._retrieve(req.question)
+            
+            # 如果有检索结果，发送来源信息
+            if retrieved:
+                sources = pipeline._format_sources(retrieved)
+                yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
+            
+            # 构建 prompt
+            prompt = pipeline._build_prompt(req.question, retrieved) if retrieved else req.question
+            
+            system = cfg.SYSTEM_PROMPT if retrieved else (
+                cfg.SYSTEM_PROMPT + "\n注意：知识库无相关资料，请基于专业知识作答。"
+            )
+            
+            # 流式生成回答
+            answer_chunks = []
+            for token in pipeline.llm_client.chat_stream(
+                prompt, 
+                system_prompt=system, 
+                history=req.history
+            ):
+                answer_chunks.append(token)
+                # 发送文本片段
+                yield f"event: chunk\ndata: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+            
+            # 组装完整答案
+            full_answer = "".join(answer_chunks)
+            
+            # 更新对话历史
+            updated_history = req.history + [
+                {"role": "user", "content": req.question},
+                {"role": "assistant", "content": full_answer},
+            ]
+            
+            # 发送完成信号
+            yield f"event: done\ndata: {json.dumps({'answer': full_answer, 'history': updated_history, 'retrieved_count': len(retrieved) }, ensure_ascii=False)}\n\n"
+            
+        except Exception as e:
+            logger.error(f"流式对话失败: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+        }
+    )
 
 
 @router.get("/stats", summary="知识库统计")

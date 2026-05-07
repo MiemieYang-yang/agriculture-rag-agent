@@ -124,7 +124,8 @@ class BM25Store:
             return []
 
         # 获取 BM25 分数
-        scores = self.bm25.get_scores(query)
+        tokenized_query = self._tokenize(query)
+        scores = self.bm25.get_scores(tokenized_query)
         top_k = min(top_k, len(scores))
 
         # 获取 top_k 索引
@@ -188,25 +189,24 @@ class BM25Store:
         """
         中文分词
 
-        简单实现：按字符分割
-        可替换为 jieba 等专业分词工具
+        使用 jieba 进行专业中文分词
         """
-        # 移除空白字符，按字符分割
-        # 对于中英文混合文本，这个简单方法效果还不错
+        try:
+            import jieba
+        except ImportError:
+            logger.error("请先安装 jieba: pip install jieba")
+            raise
+
+        # 使用jieba进行中文分词
+        words = jieba.lcut(text)
+        
+        # 过滤空白字符和标点符号，保留有意义的词
         tokens = []
-        word = ""
-        for char in text:
-            if char.isalpha():
-                word += char
-            else:
-                if word:
-                    tokens.append(word.lower())
-                    word = ""
-                # 中文字符单独作为 token
-                if '\u4e00' <= char <= '\u9fff':
-                    tokens.append(char)
-        if word:
-            tokens.append(word.lower())
+        for word in words:
+            word_stripped = word.strip()
+            if word_stripped and any(c.isalpha() or '\u4e00' <= c <= '\u9fff' for c in word_stripped):
+                tokens.append(word_stripped.lower())
+        
         return tokens
 
     def _save_index(self):
