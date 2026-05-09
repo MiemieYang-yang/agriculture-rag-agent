@@ -10,102 +10,21 @@ Agent 核心实现
 5. 返回答案 + 工具调用记录
 """
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Generator
 from dataclasses import dataclass, field
 import logging
-import re
 
 from core.config import cfg
 from core.llm_client import QwenClient
 from core.rag_pipeline import RAGPipeline
 from core.agent.tool_registry import ToolRegistry
-from core.agent.prompts import AGENT_SYSTEM_PROMPT, build_agent_prompt
+from core.agent.prompts import AGENT_SYSTEM_PROMPT
 from core.tools.base import ToolResult
 
 # 导入工具包用于自动发现
 import core.tools as tools_package
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AgentContext:
-    """
-    Agent 多轮对话上下文
-
-    用于处理追问场景，如：
-    - 用户: "四川盆地水稻最佳播种期？" → 助手回答
-    - 用户: "那玉米呢？" → 需要知道用户问的是"四川盆地玉米最佳播种期"
-    """
-    last_crop: Optional[str] = None      # 最近提到的作物
-    last_location: Optional[str] = None  # 最近提到的地点
-    last_date: Optional[str] = None      # 最近提到的时间
-    last_topic: Optional[str] = None     # 最近的话题类型
-
-    def update_from_query(self, query: str):
-        """从用户查询中提取并更新实体"""
-        # 提取作物名
-        crops = ["水稻", "小麦", "玉米", "大豆", "棉花", "油菜", "马铃薯", "甘薯",
-                 "花生", "甘蔗", "柑橘", "苹果", "茶叶"]
-        for crop in crops:
-            if crop in query:
-                self.last_crop = crop
-                break
-
-        # 提取地点（简单规则）
-        locations = ["北京", "成都", "哈尔滨", "广州", "西安", "南京", "武汉",
-                     "昆明", "乌鲁木齐", "拉萨", "四川", "东北", "华北", "华南",
-                     "西南", "西北", "华东", "华中"]
-        for loc in locations:
-            if loc in query:
-                self.last_location = loc
-                break
-
-        # 提取时间
-        time_patterns = ["今天", "明天", "后天", "昨天", "本周", "下周", "本月", "下月"]
-        for t in time_patterns:
-            if t in query:
-                self.last_date = t
-                break
-
-    def is_follow_up(self, query: str) -> bool:
-        """判断是否为追问"""
-        follow_up_patterns = [
-            r"那(\S+)呢",
-            r"那呢",
-            r"那\b",
-            r"如果.*呢",
-            r"另外",
-            r"还有",
-        ]
-        for pattern in follow_up_patterns:
-            if re.search(pattern, query):
-                return True
-        return False
-
-    def enrich_query(self, query: str) -> str:
-        """
-        补全追问中的缺失信息
-
-        例如：用户说"那玉米呢"，补全为"那[四川盆地]玉米[最佳播种期]呢"
-        """
-        if not self.is_follow_up(query):
-            return query
-
-        # 检测追问中缺失的信息
-        enriched_parts = []
-
-        # 如果追问中未提及作物但历史中有
-        if self.last_crop and self.last_crop not in query:
-            enriched_parts.append(f"（参考作物：{self.last_crop}）")
-
-        # 如果追问中未提及地点但历史中有
-        if self.last_location and self.last_location not in query:
-            enriched_parts.append(f"（参考地点：{self.last_location}）")
-
-        if enriched_parts:
-            return query + " " + " ".join(enriched_parts)
-        return query
 
 
 @dataclass
@@ -134,7 +53,6 @@ class AgentResult:
     tool_calls: List[ToolCallRecord] = field(default_factory=list)
     sources: List[Dict] = field(default_factory=list)
     iterations: int = 0
-    context: Optional[AgentContext] = None
 
     def to_dict(self) -> Dict:
         return {
@@ -194,7 +112,6 @@ class AgricultureAgent:
             self,
             question: str,
             history: Optional[List[Dict]] = None,
-            context: Optional[AgentContext] = None,
     ) -> AgentResult:
         """
         Agent 主处理流程
@@ -202,34 +119,20 @@ class AgricultureAgent:
         Args:
             question: 用户问题
             history: 对话历史
-            context: 多轮对话上下文
 
         Returns:
             AgentResult: 包含答案、工具调用记录等
         """
         logger.info(f"Agent 开始处理问题: {question[:50]}...")
 
-        # 初始化上下文
-        if context is None:
-            context = AgentContext()
-
-        # 更新上下文实体
-        context.update_from_query(question)
-
-        # 检测是否为追问
-        is_follow_up = context.is_follow_up(question)
-        if is_follow_up:
-            question = context.enrich_query(question)
-            logger.info(f"检测到追问，补全后问题: {question}")
-
         # 获取工具 schema
         tools = self.tool_registry.get_tool_schemas()
         if not tools:
             logger.warning("没有可用工具，降级为普通 RAG")
-            return self._fallback_rag(question, history, context)
+            return self._fallback_rag(question, history)
 
         # 初始化结果
-        result = AgentResult(context=context)
+        result = AgentResult()
         messages = history or []
 
         # ReAct 循环
@@ -243,12 +146,7 @@ class AgricultureAgent:
                 response = self.llm_client.chat_with_tools(
                     user_message=current_query,
                     tools=tools,
-                    system_prompt=build_agent_prompt({
-                        "is_follow_up": is_follow_up,
-                        "last_crop": context.last_crop,
-                        "last_location": context.last_location,
-                        "last_date": context.last_date,
-                    }),
+                    system_prompt=AGENT_SYSTEM_PROMPT,
                     history=messages,
                 )
 
@@ -323,12 +221,7 @@ class AgricultureAgent:
                     current_query = ""  # 后续迭代不需要用户消息
                     response = self.llm_client.submit_tool_results(
                         tool_call_results=tool_results,
-                        system_prompt=build_agent_prompt({
-                            "is_follow_up": False,
-                            "last_crop": context.last_crop,
-                            "last_location": context.last_location,
-                            "last_date": context.last_date,
-                        }),
+                        system_prompt=AGENT_SYSTEM_PROMPT,
                         history=messages,
                         tools=tools,
                     )
@@ -371,7 +264,6 @@ class AgricultureAgent:
             self,
             question: str,
             history: Optional[List[Dict]],
-            context: AgentContext,
     ) -> AgentResult:
         """降级到普通 RAG 模式"""
         logger.info("Agent 降级为普通 RAG 模式")
@@ -385,19 +277,132 @@ class AgricultureAgent:
             answer=rag_result.get("answer", ""),
             sources=rag_result.get("sources", []),
             iterations=1,
-            context=context,
         )
 
     def stream_process(
             self,
             question: str,
             history: Optional[List[Dict]] = None,
-            context: Optional[AgentContext] = None,
-    ):
+    ) -> Generator[str, None, None]:
         """
-        流式处理（Phase 4 实现）
+        流式处理
 
-        目前降级为同步处理后一次性返回
+        流程：
+        1. 同步执行工具调用（无法流式）
+        2. 最终回答使用流式输出
+
+        Args:
+            question: 用户问题
+            history: 对话历史
+
+        Yields:
+            流式输出的文本片段
         """
-        result = self.process(question, history, context)
-        yield result.answer
+        logger.info(f"Agent 开始流式处理问题: {question[:50]}...")
+
+        # 获取工具 schema
+        tools = self.tool_registry.get_tool_schemas()
+        if not tools:
+            logger.warning("没有可用工具，降级为普通 RAG 流式")
+            if self.rag_pipeline is None:
+                self.rag_pipeline = RAGPipeline()
+            # RAG 流式
+            for chunk in self.rag_pipeline.query_stream(question, history=history):
+                yield chunk
+            return
+
+        messages = history or []
+
+        # ReAct 循环（同步执行工具）
+        current_query = question
+        final_stream_ready = False
+        tool_call_results = []
+
+        for iteration in range(self.max_iterations):
+            logger.debug(f"Agent 流式迭代 {iteration + 1}/{self.max_iterations}")
+
+            try:
+                # 调用 LLM（同步）
+                response = self.llm_client.chat_with_tools(
+                    user_message=current_query,
+                    tools=tools,
+                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    history=messages,
+                )
+
+                finish_reason = response.get("finish_reason", "stop")
+                tool_calls = response.get("tool_calls", [])
+                content = response.get("content", "")
+
+                # 如果 LLM 直接返回回答，流式输出
+                if finish_reason == "stop" and not tool_calls:
+                    yield content
+                    return
+
+                # 如果有工具调用，执行工具
+                if tool_calls:
+                    # 添加助手的工具调用消息到历史
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": [
+                            {
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": tc["name"],
+                                    "arguments": tc["arguments"],
+                                }
+                            }
+                            for tc in tool_calls
+                        ]
+                    }
+                    messages.append(assistant_message)
+
+                    # 执行每个工具调用
+                    for tc in tool_calls:
+                        tool_name = tc["name"]
+                        tool_id = tc["id"]
+
+                        try:
+                            arguments = json.loads(tc["arguments"])
+                        except json.JSONDecodeError:
+                            arguments = {}
+
+                        # 执行工具
+                        tool_result = self.tool_registry.execute_tool(tool_name, **arguments)
+
+                        # 收集结果
+                        tool_call_results.append({
+                            "tool_call_id": tool_id,
+                            "name": tool_name,
+                            "result": tool_result.to_prompt_text(),
+                        })
+
+                    # 提交工具结果，流式输出最终回答
+                    current_query = ""
+                    for chunk in self.llm_client.submit_tool_results_stream(
+                        tool_call_results=tool_call_results,
+                        system_prompt=AGENT_SYSTEM_PROMPT,
+                        history=messages,
+                    ):
+                        yield chunk
+                    return
+
+                else:
+                    # 没有工具调用
+                    yield content
+                    return
+
+            except Exception as e:
+                logger.error(f"Agent 流式迭代异常: {e}")
+                yield f"处理过程中出现错误: {str(e)}"
+                return
+
+        # 达到最大迭代次数
+        yield "抱歉，我无法在有限的步骤内完成您的请求，请尝试简化问题。"
+
+
+if __name__ == '__main__':
+    agent = AgricultureAgent()
+    agent.process("四川盆地水稻播种期")

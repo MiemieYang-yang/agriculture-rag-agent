@@ -9,7 +9,7 @@ from typing import List, Dict, Optional
 import logging
 
 from core.rag_pipeline import RAGPipeline
-from core.agent.agent import AgricultureAgent, AgentContext
+from core.agent.agent import AgricultureAgent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -238,82 +238,96 @@ if prompt := st.chat_input("输入您的问题..."):
 
     # 生成回答
     with st.chat_message("assistant"):
-        with st.spinner("思考中..."):
-            try:
-                # 构建历史
-                chat_history = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages[:-1]
-                ]
+        try:
+            # 构建历史
+            chat_history = [
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.messages[:-1]
+            ]
 
-                if st.session_state.mode == "Agent":
-                    agent = get_agent()
-                    result = agent.process(prompt, history=chat_history)
-                    answer = result.answer
+            if st.session_state.mode == "Agent":
+                agent = get_agent()
 
-                    # 格式化引用来源
-                    if result.sources:
-                        src_parts = []
-                        for i, src in enumerate(result.sources[:5], 1):
-                            filename = src.get("filename", "未知")
-                            page = src.get("page", "")
-                            page_str = f" P.{page}" if page else ""
-                            score = src.get("score", 0)
-                            snippet = src.get("snippet", "")[:80]
-                            src_parts.append(
-                                f'<div class="source-card">'
-                                f'<b>{i}. {filename}{page_str}</b> <code>相关度 {score:.2f}</code><br>'
-                                f'{snippet}...</div>'
-                            )
-                        st.session_state.last_sources = "".join(src_parts)
-                    else:
-                        st.session_state.last_sources = "暂无引用来源"
+                # 流式输出
+                answer_placeholder = st.empty()
+                full_answer = ""
+                for chunk in agent.stream_process(prompt, history=chat_history):
+                    full_answer += chunk
+                    answer_placeholder.markdown(full_answer)
 
-                    # 格式化工具调用
-                    if result.tool_calls:
-                        tc_parts = []
-                        for tc in result.tool_calls:
-                            icon = "✓" if tc.success else "✗"
-                            name = tc.name
-                            args_str = ""
-                            if tc.arguments:
-                                args_str = " | ".join(f"{k}={v}" for k, v in tc.arguments.items())
-                            tc_parts.append(
-                                f'<div class="tool-card">'
-                                f'{icon} <b>{name}</b>'
-                                f'{"<br>" + args_str if args_str else ""}</div>'
-                            )
-                        st.session_state.last_tools = "".join(tc_parts)
-                    else:
-                        st.session_state.last_tools = "暂无工具调用"
+                # 流式结束后获取完整结果（包含 sources 和 tool_calls）
+                result = agent.process(prompt, history=chat_history)
 
+                # 格式化引用来源
+                if result.sources:
+                    src_parts = []
+                    for i, src in enumerate(result.sources[:5], 1):
+                        filename = src.get("filename", "未知")
+                        page = src.get("page", "")
+                        page_str = f" P.{page}" if page else ""
+                        score = src.get("score", 0)
+                        snippet = src.get("snippet", "")[:80]
+                        src_parts.append(
+                            f'<div class="source-card">'
+                            f'<b>{i}. {filename}{page_str}</b> <code>相关度 {score:.2f}</code><br>'
+                            f'{snippet}...</div>'
+                        )
+                    st.session_state.last_sources = "".join(src_parts)
                 else:
-                    pipeline = get_pipeline()
-                    rag_result = pipeline.query(prompt, history=chat_history)
-                    answer = rag_result.get("answer", "")
+                    st.session_state.last_sources = "暂无引用来源"
 
-                    if rag_result.get("sources"):
-                        src_parts = []
-                        for i, src in enumerate(rag_result["sources"][:5], 1):
-                            filename = src.get("filename", "未知")
-                            page = src.get("page", "")
-                            page_str = f" P.{page}" if page else ""
-                            score = src.get("score", 0)
-                            snippet = src.get("snippet", "")[:80]
-                            src_parts.append(
-                                f'<div class="source-card">'
-                                f'<b>{i}. {filename}{page_str}</b> <code>相关度 {score:.2f}</code><br>'
-                                f'{snippet}...</div>'
-                            )
-                        st.session_state.last_sources = "".join(src_parts)
-                    else:
-                        st.session_state.last_sources = "暂无引用来源"
+                # 格式化工具调用
+                if result.tool_calls:
+                    tc_parts = []
+                    for tc in result.tool_calls:
+                        icon = "✓" if tc.success else "✗"
+                        name = tc.name
+                        args_str = ""
+                        if tc.arguments:
+                            args_str = " | ".join(f"{k}={v}" for k, v in tc.arguments.items())
+                        tc_parts.append(
+                            f'<div class="tool-card">'
+                            f'{icon} <b>{name}</b>'
+                            f'{"<br>" + args_str if args_str else ""}</div>'
+                        )
+                    st.session_state.last_tools = "".join(tc_parts)
+                else:
                     st.session_state.last_tools = "暂无工具调用"
 
-                st.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
+            else:
+                pipeline = get_pipeline()
 
-            except Exception as e:
-                error_msg = f"处理出错: {str(e)}"
-                st.error(error_msg)
-                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                # 流式输出
+                answer_placeholder = st.empty()
+                full_answer = ""
+                for chunk in pipeline.query_stream(prompt, history=chat_history):
+                    full_answer += chunk
+                    answer_placeholder.markdown(full_answer)
+
+                # 获取来源信息
+                rag_result = pipeline.query(prompt, history=chat_history)
+
+                if rag_result.get("sources"):
+                    src_parts = []
+                    for i, src in enumerate(rag_result["sources"][:5], 1):
+                        filename = src.get("filename", "未知")
+                        page = src.get("page", "")
+                        page_str = f" P.{page}" if page else ""
+                        score = src.get("score", 0)
+                        snippet = src.get("snippet", "")[:80]
+                        src_parts.append(
+                            f'<div class="source-card">'
+                            f'<b>{i}. {filename}{page_str}</b> <code>相关度 {score:.2f}</code><br>'
+                            f'{snippet}...</div>'
+                        )
+                    st.session_state.last_sources = "".join(src_parts)
+                else:
+                    st.session_state.last_sources = "暂无引用来源"
+                st.session_state.last_tools = "暂无工具调用"
+
+            st.session_state.messages.append({"role": "assistant", "content": full_answer})
+
+        except Exception as e:
+            error_msg = f"处理出错: {str(e)}"
+            st.error(error_msg)
+            st.session_state.messages.append({"role": "assistant", "content": error_msg})

@@ -76,12 +76,13 @@ class KnowledgeSearchTool(BaseTool):
             )
 
         try:
-            # 调用 RAG Pipeline 检索
+            # 调用 RAG Pipeline 检索（包含 LLM 生成的回答）
             result = self.rag_pipeline.query(query)
 
             # 整理检索结果
             sources = result.get("sources", [])
             retrieved_count = result.get("retrieved_count", 0)
+            answer = result.get("answer", "")
 
             # 构建返回数据
             search_result = {
@@ -89,13 +90,11 @@ class KnowledgeSearchTool(BaseTool):
                 "retrieved_count": retrieved_count,
                 "contexts": [],
                 "sources": sources,
+                "answer": answer,  # 包含 RAG 生成的完整回答
             }
 
             # 如果有检索结果，提取文本内容
             if retrieved_count > 0:
-                # 从 RAG 结果中提取上下文
-                # 注意：RAGPipeline.query() 返回的 answer 包含了 LLM 生成的回答
-                # 这里我们只返回检索到的原始内容
                 search_result["contexts"] = [
                     {
                         "content": src.get("snippet", ""),
@@ -105,10 +104,21 @@ class KnowledgeSearchTool(BaseTool):
                     for src in sources
                 ]
 
+            # 打印详细检索结果（调试用）
             logger.info(f"知识库检索完成: 查询='{query[:30]}...', 结果数={retrieved_count}")
+            if sources:
+                logger.info("=" * 60)
+                logger.info("【检索到的文献】")
+                for i, src in enumerate(sources, 1):
+                    logger.info(f"  [{i}] 文件: {src.get('filename', '未知')}")
+                    logger.info(f"      相关度: {src.get('score', 0):.4f}")
+                    logger.info(f"      页码: {src.get('page', '无')}")
+                    logger.info(f"      内容: {src.get('snippet', '')[:200]}...")
+                logger.info("=" * 60)
+            logger.info(f"【RAG 生成的回答】\n{answer[:500]}...")
 
-            # 生成摘要
-            summary = self._generate_summary(query, retrieved_count, sources)
+            # 生成摘要（包含完整回答，让 Agent 直接使用）
+            summary = self._generate_summary(query, retrieved_count, sources, answer)
 
             return ToolResult(
                 name=self.name,
@@ -126,11 +136,16 @@ class KnowledgeSearchTool(BaseTool):
                 error=f"知识库检索失败: {str(e)}",
             )
 
-    def _generate_summary(self, query: str, count: int, sources: List[Dict]) -> str:
+    def _generate_summary(self, query: str, count: int, sources: List[Dict], answer: str = "") -> str:
         """生成给 LLM 的检索摘要"""
         if count == 0:
-            return f"知识库中未找到与「{query}」相关的信息。"
+            return f"知识库中未找到与「{query}」相关的信息。请基于你的专业知识回答。"
 
+        # 直接返回 RAG 生成的完整回答，让 Agent 可以直接使用
+        if answer:
+            return answer
+
+        # 备用：如果没有 answer，返回检索结果摘要
         summary_parts = [f"知识库检索到 {count} 条相关结果："]
         for i, src in enumerate(sources[:3], 1):
             filename = src.get("filename", "未知来源")

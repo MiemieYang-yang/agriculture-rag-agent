@@ -14,7 +14,7 @@ from typing import List, Dict, Optional
 import logging
 
 from core.rag_pipeline import RAGPipeline
-from core.agent.agent import AgricultureAgent, AgentContext
+from core.agent.agent import AgricultureAgent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def chat_with_agent(
     mode: str,
 ):
     """
-    聊天处理函数
+    聊天处理函数（流式输出）
 
     Args:
         message: 用户消息
@@ -114,30 +114,42 @@ def chat_with_agent(
 
     try:
         if mode == "Agent 智能问答":
-            # Agent 模式
+            # Agent 流式模式
             agent = get_agent()
-            result = agent.process(message, history=chat_history)
 
-            answer = result.answer
+            # 使用流式输出
+            full_response = ""
+            for chunk in agent.stream_process(message, history=chat_history):
+                full_response += chunk
+                # 更新历史中的助手回复
+                display_history = history + [{"role": "assistant", "content": full_response}]
+                yield display_history, "", "", ""  # 流式输出时不显示来源
+
+            # 流式结束后，通过 process 获取完整结果（包含 sources 和 tool_calls）
+            result = agent.process(message, history=chat_history)
             sources_str = format_sources(result.sources)
             tools_str = format_tool_calls(result.tool_calls)
 
-        else:
-            # RAG 模式
-            pipeline = get_pipeline()
-            rag_result = pipeline.query(message, history=chat_history)
-
-            answer = rag_result.get("answer", "")
-            sources_str = format_sources(rag_result.get("sources", []))
-            tools_str = ""
-
-        # 流式输出效果
-        full_response = ""
-        for char in answer:
-            full_response += char
-            # 更新历史中的助手回复
+            # 最终更新，带上来源信息
             display_history = history + [{"role": "assistant", "content": full_response}]
             yield display_history, sources_str, tools_str, ""
+
+        else:
+            # RAG 流式模式
+            pipeline = get_pipeline()
+
+            full_response = ""
+            for chunk in pipeline.query_stream(message, history=chat_history):
+                full_response += chunk
+                display_history = history + [{"role": "assistant", "content": full_response}]
+                yield display_history, "", "", ""
+
+            # 获取来源信息
+            rag_result = pipeline.query(message, history=chat_history)
+            sources_str = format_sources(rag_result.get("sources", []))
+
+            display_history = history + [{"role": "assistant", "content": full_response}]
+            yield display_history, sources_str, "", ""
 
     except Exception as e:
         logger.error(f"处理失败: {e}")

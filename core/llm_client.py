@@ -310,3 +310,57 @@ class QwenClient:
         except Exception as e:
             logger.error(f"提交工具结果失败: {e}")
             raise
+
+    # ── 流式工具调用支持 ───────────────────────────────────────────────────────
+
+    def submit_tool_results_stream(
+            self,
+            tool_call_results: List[Dict],
+            system_prompt: str = cfg.SYSTEM_PROMPT,
+            history: Optional[List[Dict]] = None,
+            temperature: float = 0.3,
+            max_tokens: int = 2048,
+    ) -> Generator[str, None, None]:
+        """
+        流式提交工具执行结果
+
+        Args:
+            tool_call_results: 工具调用结果列表
+            system_prompt: 系统提示词
+            history: 对话历史
+            temperature: 生成随机性
+            max_tokens: 最大输出长度
+
+        Yields:
+            流式输出的文本片段
+        """
+        # 构建 messages
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history)
+
+        # 添加每个工具调用结果
+        for result in tool_call_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": result.get("tool_call_id", ""),
+                "content": result.get("result", ""),
+            })
+
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+
+        except Exception as e:
+            logger.error(f"流式提交工具结果失败: {e}")
+            raise
