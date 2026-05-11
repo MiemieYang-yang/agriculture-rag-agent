@@ -87,5 +87,25 @@ class Config:
     WEATHER_API_KEY: str = os.getenv("WEATHER_API_KEY", "")
     WEATHER_API_URL: str = os.getenv("WEATHER_API_URL", "")
 
+    # ── 数据库连接配置 ────────────────────────────────────
+    XG_DB_HOST: str = os.getenv("XG_DB_HOST", "localhost")
+    XG_DB_PORT: str = os.getenv("XG_DB_PORT", "35138")
+    XG_DB_DATABASE: str = os.getenv("XG_DB_DATABASE", "SYSTEM")
+    XG_DB_USER: str = os.getenv("XG_DB_USER", "")
+    XG_DB_PASSWORD: str = os.getenv("XG_DB_PASSWORD", "")
+    XG_DB_AUTO_COMMIT: str = os.getenv("XG_DB_AUTO_COMMIT", "on")
+
+    @property
+    def xg_db_info(self) -> dict:
+        """数据库连接配置字典"""
+        return {
+            "host": self.XG_DB_HOST,
+            "port": self.XG_DB_PORT,
+            "database": self.XG_DB_DATABASE,
+            "user": self.XG_DB_USER,
+            "password": self.XG_DB_PASSWORD,
+            "auto_commit": self.XG_DB_AUTO_COMMIT,
+        }
+
 
 cfg = Config()
