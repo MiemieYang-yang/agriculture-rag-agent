@@ -13,10 +13,16 @@ RAGAS 评估指标：
     results = evaluator.evaluate(pipeline)
     print(results)
 """
+import sys
+import os
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import asyncio
 from typing import List, Dict, Optional
 from datasets import Dataset
 import logging
+from core.config import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +53,11 @@ class RAGASEvaluator:
         """
         用 RAG Pipeline 生成答案和检索上下文
 
-        RAGAS 需要的字段:
-        - question: str (问题)
-        - answer: str (RAG生成的答案)
-        - contexts: List[str] (检索到的文档内容列表)
-        - ground_truth: str (标准答案)
+        RAGAS 0.4.x 需要的字段:
+        - user_input: str (问题)
+        - response: str (RAG生成的答案)
+        - retrieved_contexts: List[str] (检索到的文档内容列表)
+        - reference: str (标准答案)
 
         Args:
             pipeline: RAGPipeline 实例
@@ -64,7 +70,7 @@ class RAGASEvaluator:
         results = []
         for i, item in enumerate(self.test_data):
             question = item["question"]
-            ground_truth = item["ground_truth"]
+            reference = item["ground_truth"]
 
             logger.info(f"处理问题 {i + 1}/{len(self.test_data)}: {question[:50]}...")
 
@@ -72,24 +78,24 @@ class RAGASEvaluator:
             retrieved = pipeline._retrieve(question)
 
             # 提取检索上下文
-            contexts = [doc["content"] for doc in retrieved]
+            retrieved_contexts = [doc["content"] for doc in retrieved]
 
             # 如果有检索结果，生成答案
-            if contexts:
+            if retrieved_contexts:
                 prompt = pipeline._build_prompt(question, retrieved)
-                answer = pipeline.llm_client.chat(prompt)
+                response = pipeline.llm_client.chat(prompt)
             else:
                 # 无检索结果时的 fallback
-                answer = pipeline.llm_client.chat(
+                response = pipeline.llm_client.chat(
                     question,
-                    system_prompt=pipeline.llm_client.system_prompt or "请基于你的专业知识回答。",
+                    system_prompt=cfg.SYSTEM_PROMPT or "请基于你的专业知识回答。",
                 )
 
             results.append({
-                "question": question,
-                "answer": answer,
-                "contexts": contexts,
-                "ground_truth": ground_truth,
+                "user_input": question,
+                "response": response,
+                "retrieved_contexts": retrieved_contexts,
+                "reference": reference,
             })
 
         logger.info(f"RAG 回答生成完成")
@@ -116,15 +122,13 @@ class RAGASEvaluator:
                 "context_recall": 0.68,
             }
         """
-        # 导入 RAGAS
+        # 导入 RAGAS (适配 0.4.x 版本)
         try:
             from ragas import evaluate
-            from ragas.metrics import (
-                faithfulness,
-                answer_relevancy,
-                context_precision,
-                context_recall,
-            )
+            from ragas.metrics._faithfulness import Faithfulness
+            from ragas.metrics._answer_relevance import AnswerRelevancy
+            from ragas.metrics._context_precision import ContextPrecision
+            from ragas.metrics._context_recall import ContextRecall
         except ImportError:
             logger.error("请先安装 ragas: pip install ragas")
             raise
@@ -132,18 +136,18 @@ class RAGASEvaluator:
         # 默认评估所有指标
         if metrics is None:
             metrics_to_use = [
-                faithfulness,
-                answer_relevancy,
-                context_precision,
-                context_recall,
+                Faithfulness(),
+                AnswerRelevancy(),
+                ContextPrecision(),
+                ContextRecall(),
             ]
         else:
             # 根据名称选择指标
             metrics_map = {
-                "faithfulness": faithfulness,
-                "answer_relevancy": answer_relevancy,
-                "context_precision": context_precision,
-                "context_recall": context_recall,
+                "faithfulness": Faithfulness(),
+                "answer_relevancy": AnswerRelevancy(),
+                "context_precision": ContextPrecision(),
+                "context_recall": ContextRecall(),
             }
             metrics_to_use = [metrics_map[m] for m in metrics if m in metrics_map]
 
@@ -158,20 +162,28 @@ class RAGASEvaluator:
 
         # 执行评估
         try:
-            # RAGAS 0.1.x 版本的调用方式
+            # 配置超时和重试（适配网络较慢的情况）
+            from ragas.run_config import RunConfig
+            run_config = RunConfig(
+                timeout=300,      # 5分钟超时
+                max_retries=5,    # 最多重试5次
+                max_wait=60,      # 重试等待时间
+            )
+
+            # RAGAS 0.4.x 版本的调用方式
             result = evaluate(
                 dataset,
                 metrics=metrics_to_use,
                 llm=llm,
                 embeddings=embeddings,
+                run_config=run_config,
             )
 
-            # 提取分数
+            # 提取平均分数 (使用 _repr_dict)
             scores = {}
-            for metric in metrics_to_use:
-                metric_name = metric.name
-                if metric_name in result:
-                    scores[metric_name] = float(result[metric_name])
+            if hasattr(result, '_repr_dict'):
+                for metric_name, score in result._repr_dict.items():
+                    scores[metric_name] = float(score)
 
             logger.info("RAGAS 评估完成")
             for metric_name, score in scores.items():
@@ -193,16 +205,25 @@ class RAGASEvaluator:
             openai_api_key=cfg.QWEN_API_KEY,
             openai_api_base=cfg.QWEN_BASE_URL,
             temperature=0.3,
+            request_timeout=120,  # 单次请求超时 2分钟
         )
 
     def _get_ragas_embeddings(self):
         """配置 RAGAS 使用的 Embeddings"""
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
         from core.config import cfg
 
-        # 使用 BGE-M3 模型
+        # 使用本地 BGE-M3 模型路径
+        model_path = os.path.join(Path(__file__).parent.parent, "bge-m3")
+        if not os.path.exists(model_path):
+            logger.warning(f"本地模型路径不存在: {model_path}，将尝试从网络下载")
+            model_path = cfg.BGE_MODEL_NAME
+
         return HuggingFaceEmbeddings(
-            model_name=cfg.BGE_MODEL_NAME,
+            model_name=model_path,
             model_kwargs={"trust_remote_code": True},
         )
 
@@ -233,6 +254,10 @@ class RAGASEvaluator:
 
 
 if __name__ == "__main__":
+    # 切换到项目根目录（确保相对路径正确）
+    project_root = Path(__file__).parent.parent
+    os.chdir(project_root)
+
     # 测试评估器
     from core.rag_pipeline import RAGPipeline
 

@@ -19,7 +19,7 @@ import json
 import time
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 import logging
 
