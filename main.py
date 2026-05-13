@@ -8,8 +8,6 @@
 Phase 3 新增：
 3. Agent 模式（工具调用）：      python main.py --agent
 
-Phase 4 新增：
-4. Gradio 前端模式：             python main.py --gradio
 """
 import argparse
 import sys
@@ -18,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import logging
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -118,11 +117,11 @@ def run_agent(stream: bool = False):
     """
     from core.container import container
 
-    logger.info("初始化 LangGraph Agent...")
-    agent = container.langgraph_agent
+    logger.info("初始化 Agent...")
+    agent = container.agent
 
     print("\n" + "=" * 60)
-    print("  农业气候与资源数据专家助手（Agent 模式 - LangGraph）")
+    print("  农业气候与资源数据专家助手（Agent 模式）")
     print("  支持：天气查询、农学计算、知识库检索")
     if stream:
         print("  模式: 流式输出")
@@ -194,9 +193,10 @@ def run_agent(stream: bool = False):
             print(f"出错了: {e}\n")
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000):
-    """API 服务模式：启动 FastAPI"""
-    import uvicorn
+# ── FastAPI 应用实例（全局，支持 reload）─────────────────────────────────────
+
+def create_app() -> FastAPI:
+    """创建 FastAPI 应用实例"""
     from contextlib import asynccontextmanager
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -231,23 +231,20 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     def health():
         return {"status": "ok", "service": "agri-rag"}
 
+    return app
+
+
+# 创建全局 app 实例（用于 uvicorn reload 模式）
+app = create_app()
+
+
+def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
+    """API 服务模式：启动 FastAPI"""
+    import uvicorn
+
     logger.info(f"API 服务启动: http://{host}:{port}")
     logger.info(f"接口文档:     http://{host}:{port}/docs")
-    uvicorn.run(app, host=host, port=port)
-
-
-def run_gradio(host: str = "0.0.0.0", port: int = 7860, share: bool = False):
-    """Gradio 前端模式：启动 Web 界面"""
-    from gradio_app import app
-
-    logger.info(f"Gradio 服务启动: http://{host}:{port}")
-    if share:
-        logger.info("公网分享已启用，将生成临时公网链接")
-    app.launch(
-        server_name=host,
-        server_port=port,
-        share=share,
-    )
+    uvicorn.run("main:app", host=host, port=port, reload=reload)
 
 
 def run_streamlit(host: str = "0.0.0.0", port: int = 8501):
@@ -270,21 +267,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="农业 RAG 专家助手")
     parser.add_argument("--serve", action="store_true", help="启动 API 服务模式")
     parser.add_argument("--agent", action="store_true", help="启动 Agent 模式（支持工具调用）")
-    parser.add_argument("--gradio", action="store_true", help="启动 Gradio 前端模式")
     parser.add_argument("--streamlit", action="store_true", help="启动 Streamlit 前端模式")
     parser.add_argument("--host", default="0.0.0.0", help="服务监听地址")
     parser.add_argument("--port", type=int, default=8000, help="API 端口（Gradio 默认 7860，Streamlit 默认 8501）")
     parser.add_argument("--share", action="store_true", help="Gradio 模式下启用公网分享")
     parser.add_argument("--stream", action="store_true", help="启用流式输出（CLI模式）")
+    parser.add_argument("--reload", action="store_true", help="启用热重载（仅 serve 模式）")
     args = parser.parse_args()
 
     if args.serve:
-        run_server(args.host, args.port)
+        run_server(args.host, args.port, reload=args.reload)
     elif args.agent:
         run_agent(stream=args.stream)
-    elif args.gradio:
-        port = args.port if args.port != 8000 else 7860
-        run_gradio(args.host, port, args.share)
     elif args.streamlit:
         port = args.port if args.port != 8000 else 8501
         run_streamlit(args.host, port)

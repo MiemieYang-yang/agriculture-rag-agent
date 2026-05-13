@@ -184,6 +184,9 @@ agri_rag/
 ---
 
 ## 七、变更日志
+### v0.4.4
+- 增加server启动入口，可以apifox进行debug
+
 ### v0.4.3 — 架构重构（工具自动发现 + 依赖注入容器 + ToolResult 统一格式）
 **改造项一：工具自动发现机制**
 - 重构 `core/agent/tool_registry.py`：

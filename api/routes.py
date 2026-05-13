@@ -236,7 +236,7 @@ async def agent_query(req: AgentQueryRequest):
     4. 返回最终答案 + 工具调用记录
     """
     try:
-        agent = container.langgraph_agent
+        agent = container.agent
 
         # 执行 Agent
         result = agent.process(
@@ -244,16 +244,16 @@ async def agent_query(req: AgentQueryRequest):
             history=req.history if req.history else None,
         )
 
-        # 构建响应
+        # 构建响应（result 是 AgentResult dataclass）
         tool_calls = [
             ToolCallInfo(
-                id=tc.get("id", str(i)),
-                name=tc.get("name", ""),
-                arguments=tc.get("arguments", {}),
-                result=tc.get("result", {}),
-                success=tc.get("success", True),
+                id=tc.id,
+                name=tc.name,
+                arguments=tc.arguments,
+                result=tc.result,
+                success=tc.success,
             )
-            for i, tc in enumerate(result.get("tool_calls", []))
+            for tc in result.tool_calls
         ]
 
         sources = [
@@ -263,14 +263,14 @@ async def agent_query(req: AgentQueryRequest):
                 score=src.get("score", 0),
                 snippet=src.get("snippet", ""),
             )
-            for src in result.get("sources", [])
+            for src in result.sources
         ]
 
         return AgentQueryResponse(
-            answer=result.get("answer", ""),
+            answer=result.answer,
             tool_calls=tool_calls,
             sources=sources,
-            iterations=result.get("iterations", 0),
+            iterations=result.iterations,
         )
 
     except Exception as e:
@@ -282,11 +282,11 @@ async def agent_query(req: AgentQueryRequest):
 async def list_tools():
     """列出 Agent 可用的所有工具"""
     try:
-        agent = container.langgraph_agent
-        tools = agent.get_tools_info()
+        agent = container.agent
+        tools = agent.tool_registry.list_tools()
         return {
             "tools": tools,
-            "framework": "LangGraph"
+            "framework": "ReAct (Qwen Tool Calling)"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -51,7 +51,6 @@ class Container:
             self._hybrid_retriever = HybridRetriever(
                 vector_store=self.vector_store,
                 bm25_store=self.bm25_store,
-                reranker=self.reranker,
             )
         return self._hybrid_retriever
 
